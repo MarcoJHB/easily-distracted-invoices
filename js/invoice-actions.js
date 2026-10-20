@@ -4,7 +4,7 @@ import {
   store, invoiceTotal, invoiceEur, nextInvoiceNumber, normalizeInvoice, effectiveStatus, numericPart, vatRuleFor,
 } from './store.js';
 import {
-  esc, uid, clone, todayISO, addDays, fmtDate, fmtMoney, round2, parseNumber,
+  esc, uid, clone, todayISO, addDays, fmtDate, fmtMoney, round2, parseNumber, fmtMonth,
 } from './util.js';
 import { modal, field, formValues, toast, confirmDialog } from './ui.js';
 import { downloadPdf, printInvoice, businessDisplayName } from './invoice.js';
@@ -107,7 +107,7 @@ export function reminderEmail(inv) {
   const firstName = (s.business.name || '').split(' ')[0] || '';
   const status = effectiveStatus(inv);
   const total = fmtMoney(invoiceTotal(inv), inv.currency);
-  const what = inv.campaign ? ` for ${inv.campaign}` : '';
+  const what = inv.campaign ? ` for ${inv.campaign}${inv.campaignMonth ? ` (${fmtMonth(inv.campaignMonth)})` : ''}` : '';
   const dueLine = status === 'overdue'
     ? `was due on ${fmtDate(inv.dueDate)} and I haven't seen the payment come through yet`
     : `is due on ${fmtDate(inv.dueDate)}`;
@@ -160,6 +160,7 @@ export function duplicateInvoice(inv) {
     number: nextInvoiceNumber(store.data),
     status: 'new',
     reference: '',
+    campaignMonth: todayISO().slice(0, 7),
     issueDate: todayISO(),
     serviceDate: '',
     termsDays: terms,
@@ -221,6 +222,8 @@ export function missingForPdf(inv) {
   if (!s.bank.iban) add('your IBAN', '#/settings/bank');
   if (inv.client && vatRuleFor(inv.client) === 'reverse' && !s.business.vatNumber) add('your intra-EU VAT number (needed for EU clients)', '#/settings/business');
   if (!inv.client?.name) add('a client');
+  if (!inv.campaign) add('the campaign name');
+  if (!inv.campaignMonth) add('the campaign month');
   if (!inv.serviceDate) add('the service date');
   if (!invoiceTotal(inv)) add('an amount');
   else if (invoiceTotal(inv) < 0) add('a positive total (it’s negative – use a credit note for refunds)');
@@ -232,7 +235,7 @@ export function emailInvoice(inv) {
   const s = store.settings;
   const c = inv.client || {};
   const first = (s.business.name || '').split(' ')[0] || '';
-  const subject = `Invoice ${inv.number}${inv.campaign ? ` – ${inv.campaign}` : ''}`;
+  const subject = `Invoice ${inv.number}${inv.campaign ? ` – ${inv.campaign}` : ''}${inv.campaignMonth ? ` (${fmtMonth(inv.campaignMonth)})` : ''}`;
   const body = [
     `Hi ${c.contactName ? c.contactName.split(' ')[0] : 'there'},`,
     '',

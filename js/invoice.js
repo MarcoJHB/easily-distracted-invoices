@@ -3,7 +3,7 @@
 // so what you see is what the client gets.
 
 import {
-  esc, fmtDate, fmtMoney, fmtRate, amountToWords, nl2lines, daysBetween, slugify, safeFileName,
+  esc, fmtDate, fmtMoney, fmtRate, amountToWords, nl2lines, daysBetween, slugify, safeFileName, fmtMonth,
 } from './util.js';
 import { lineAmount, invoiceTotal, vatRuleFor } from './store.js';
 
@@ -51,6 +51,8 @@ export function renderInvoice(inv, settings) {
   ];
   if (inv.serviceDate) meta.push(['Service Date', fmtDate(inv.serviceDate)]);
   meta.push(['Due Date', fmtDate(inv.dueDate)]);
+  if (inv.campaign) meta.push(['Campaign', inv.campaign]);
+  if (inv.campaignMonth) meta.push(['Campaign Month', fmtMonth(inv.campaignMonth)]);
   if (inv.reference) meta.push(['Reference', inv.reference]);
 
   const byLines = [
@@ -152,6 +154,7 @@ export const FILE_TOKENS = [
   ['{number}', 'Invoice number'],
   ['{client}', 'Client name'],
   ['{campaign}', 'Campaign'],
+  ['{campaignmonth}', 'Campaign month (august-2026)'],
   ['{reference}', 'Reference'],
   ['{date}', 'Invoice date (2026-10-20)'],
   ['{year}', 'Year'],
@@ -170,6 +173,7 @@ export function buildFileName(template, inv, settings, slug = true) {
     number: inv.number || 'draft',
     client: inv.client?.name || 'client',
     campaign: inv.campaign || '',
+    campaignmonth: fmtMonth(inv.campaignMonth),
     reference: inv.reference || '',
     date: d,
     year: d.slice(0, 4),

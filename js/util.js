@@ -211,3 +211,18 @@ export function nl2lines(text) {
     .map((l) => l.trim())
     .filter(Boolean);
 }
+
+const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// "2026-08" -> "August 2026"
+export function fmtMonth(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym || '');
+  if (!m) return '';
+  return `${LONG_MONTHS[Number(m[2]) - 1]} ${m[1]}`;
+}
+// "Warhammer 40,000: Tacticus - August 2026" -> { name, month: "2026-08" }
+export function splitCampaignMonth(text) {
+  const m = /^(.*?)[\s\-–—,:]+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\s*$/i.exec(text || '');
+  if (!m || !m[1].trim()) return null;
+  const idx = LONG_MONTHS.findIndex((x) => x.toLowerCase() === m[2].toLowerCase());
+  return { name: m[1].trim(), month: `${m[3]}-${String(idx + 1).padStart(2, '0')}` };
+}

@@ -3,7 +3,7 @@ import {
   store, normalizeInvoice, nextInvoiceNumber, invoiceTotal, lineAmount, clientSnapshot, effectiveStatus, numericPart,
 } from './store.js';
 import {
-  esc, clone, todayISO, addDays, daysBetween, fmtDate, fmtMoney, round2, parseNumber, uid, debounce,
+  esc, clone, todayISO, addDays, daysBetween, fmtDate, fmtMoney, round2, parseNumber, uid, debounce, fmtMonth, splitCampaignMonth,
 } from './util.js';
 import { icons, statusPill, toast, modal, confirmDialog } from './ui.js';
 import { renderInvoice, buildFileName } from './invoice.js';
@@ -25,6 +25,7 @@ function blankInvoice(clientId) {
     clientId: client?.id || '',
     client: clientSnapshot(client),
     issueDate: issue,
+    campaignMonth: issue.slice(0, 7),
     termsDays,
     dueDate: addDays(issue, termsDays),
     currency: client?.currency || s.defaultCurrency,
@@ -113,9 +114,17 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
             <h2>Campaign</h2>
             <div class="grid2">
               <label class="field full"><span class="field-label">Campaign</span>
-                <input name="campaign" placeholder="Game name - Month Year" list="campaign-list">
+                <input name="campaign" placeholder="Warhammer 40,000: Tacticus" list="campaign-list">
                 <datalist id="campaign-list"></datalist>
               </label>
+              <label class="field"><span class="field-label">Campaign month</span>
+                <input type="month" name="campaignMonth" placeholder="2026-08">
+                <small class="field-hint" data-role="monthhint">The month the campaign ran. Printed on the invoice.</small>
+              </label>
+              <div class="field"><span class="field-label">Fee for this campaign</span>
+                <b class="fee-total" data-role="fee"></b>
+                <small class="field-hint">Total of the items below.</small>
+              </div>
               <label class="field"><span class="field-label">Reference</span>
                 <input name="reference" placeholder="Campaign ID or PO number">
                 <small class="field-hint">Sponsor’s campaign ID or PO. Printed on the invoice.</small>
@@ -229,6 +238,7 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
 
   function fillForm() {
     input('campaign').value = inv.campaign;
+    input('campaignMonth').value = inv.campaignMonth || '';
     input('reference').value = inv.reference;
     input('number').value = inv.number;
     input('issueDate').value = inv.issueDate;
@@ -282,6 +292,7 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
     });
     const t = q('[data-role=total]');
     if (t) t.textContent = fmtMoney(invoiceTotal(inv), inv.currency);
+    q('[data-role=fee]').textContent = fmtMoney(invoiceTotal(inv), inv.currency);
   }
 
   // ---------- status bits ----------
@@ -289,6 +300,7 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
     q('[data-role=title]').textContent = isNew && !saved ? `${from ? 'Copy' : 'New invoice'} ${inv.number}` : `Invoice ${inv.number}`;
     q('[data-role=pill]').innerHTML = statusPill(effectiveStatus(inv));
     q('[data-role=unsaved]').hidden = !dirty();
+    q('[data-role=fee]').textContent = fmtMoney(invoiceTotal(inv), inv.currency);
     root.querySelectorAll('[data-cur]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.cur === inv.currency)));
     root.querySelectorAll('[data-st]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.st === inv.status)));
     root.querySelectorAll('[data-days]').forEach((b) => b.classList.toggle('on', Number(b.dataset.days) === Number(inv.termsDays)));
@@ -519,7 +531,21 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
       return;
     }
     switch (t.name) {
-      case 'campaign': case 'reference': case 'number': case 'notes':
+      case 'campaign': {
+        // typing "Game - August 2026" fills the month for you
+        const split = splitCampaignMonth(t.value);
+        if (split && e.inputType !== 'deleteContentBackward') {
+          inv.campaign = split.name;
+          inv.campaignMonth = split.month;
+          t.value = split.name;
+          input('campaignMonth').value = split.month;
+        } else inv.campaign = t.value;
+        break;
+      }
+      case 'campaignMonth':
+        inv.campaignMonth = t.value;
+        break;
+      case 'reference': case 'number': case 'notes':
         inv[t.name] = t.value;
         break;
       case 'serviceDate':
@@ -593,8 +619,8 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
         if (fx) rate = round2(preset.currency === 'USD' ? rate * fx : rate / fx);
         else toast(`No exchange rate available, so ${fmtMoney(rate, preset.currency)} was added as ${fmtMoney(rate, inv.currency)}. Check the amount.`, { type: 'error' });
       }
-      const title = `1 x ${preset.title}${inv.reference ? ` - ${inv.reference}` : ''}${inv.campaign ? ` ${inv.campaign.split(' - ')[0]}` : ''}`;
-      const item = { title, description: inv.campaign || '', qty: 1, rate };
+      const title = `1 x ${preset.title}${inv.reference ? ` - ${inv.reference}` : ''}${inv.campaign ? ` ${inv.campaign}` : ''}`;
+      const item = { title, description: [inv.campaign, fmtMonth(inv.campaignMonth)].filter(Boolean).join(' - '), qty: 1, rate };
       const onlyBlank = inv.items.length === 1 && !inv.items[0].title && !inv.items[0].rate;
       if (onlyBlank) inv.items = [item];
       else inv.items.push(item);

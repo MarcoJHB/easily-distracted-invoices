@@ -2,7 +2,7 @@
 // and syncing to GitHub with an offline cache in localStorage.
 
 import { loadFile, saveFile, checkRepo, GitHubError } from './github.js';
-import { clone, round2, todayISO, uid, debounce } from './util.js';
+import { clone, round2, todayISO, uid, debounce, splitCampaignMonth } from './util.js';
 
 const CONN_KEY = 'edg.connection.v1';
 const CACHE_KEY = 'edg.ledger.cache.v1';
@@ -86,13 +86,20 @@ export function migrate(data) {
 }
 
 export function normalizeInvoice(inv) {
+  let campaign = inv.campaign || '';
+  let campaignMonth = /^\d{4}-\d{2}$/.test(inv.campaignMonth || '') ? inv.campaignMonth : '';
+  if (!campaignMonth && inv.campaignMonth === undefined) {
+    const split = splitCampaignMonth(campaign); // older invoices kept the month inside the name
+    if (split) { campaign = split.name; campaignMonth = split.month; }
+  }
   return {
     id: inv.id || uid('inv'),
     number: inv.number || '',
     status: ['new', 'waiting', 'paid'].includes(inv.status) ? inv.status : 'new',
     clientId: inv.clientId || '',
     client: inv.client || null, // snapshot of client details at the time of invoicing
-    campaign: inv.campaign || '',
+    campaign,
+    campaignMonth, // "2026-08": the month the campaign ran
     reference: inv.reference || '',
     issueDate: inv.issueDate || todayISO(),
     serviceDate: inv.serviceDate || '',

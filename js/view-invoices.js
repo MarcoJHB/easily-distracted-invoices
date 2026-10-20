@@ -3,7 +3,7 @@ import {
   store, invoiceTotal, invoiceEur, invoiceIn, effectiveStatus, reminderDue,
 } from './store.js';
 import {
-  esc, fmtDateShort, fmtMoney, todayISO, downloadBlob, daysBetween,
+  esc, fmtDateShort, fmtMoney, todayISO, downloadBlob, daysBetween, fmtMonth,
 } from './util.js';
 import { icons, statusPill, STATUS, toast } from './ui.js';
 import {
@@ -67,7 +67,7 @@ export function renderInvoices(root, { navigate, params }) {
       if (state.client && inv.clientId !== state.client) return false;
       if (state.year !== 'all' && !(inv.issueDate || '').startsWith(state.year)) return false;
       if (q) {
-        const hay = [inv.number, inv.client?.name, inv.campaign, inv.reference, inv.notes, ...(inv.items || []).map((i) => `${i.title} ${i.description}`)].join(' ').toLowerCase();
+        const hay = [inv.number, inv.client?.name, inv.campaign, fmtMonth(inv.campaignMonth), inv.reference, inv.notes, ...(inv.items || []).map((i) => `${i.title} ${i.description}`)].join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -217,7 +217,7 @@ export function renderInvoices(root, { navigate, params }) {
           <td class="c-number"><a href="#/invoices/${esc(inv.id)}" class="num-link">${esc(inv.number || 'Draft')}</a></td>
           <td class="c-status">${statusSelect(inv)}</td>
           <td class="c-client">${esc(inv.client?.name || '—')}</td>
-          <td class="c-campaign" title="${esc(inv.campaign)}">${esc(inv.campaign || '—')}</td>
+          <td class="c-campaign" title="${esc(inv.campaign)}">${esc(inv.campaign || '—')}${inv.campaignMonth ? `<span class="due-rel">${esc(fmtMonth(inv.campaignMonth))}</span>` : ''}</td>
           <td class="c-ref">${esc(inv.reference || '—')}</td>
           <td class="c-date">${esc(fmtDateShort(inv.issueDate))}</td>
           <td class="c-date ${st === 'overdue' ? 'warn' : ''}">${esc(fmtDateShort(inv.dueDate))}${dueRel(inv)}</td>
@@ -235,7 +235,7 @@ export function renderInvoices(root, { navigate, params }) {
           <a class="inv-card-main" href="#/invoices/${esc(inv.id)}">
             <span class="inv-card-top"><b>${esc(inv.number)}</b>${st === 'overdue' ? statusPill(st) : ''}</span>
             <span class="inv-card-client">${esc(inv.client?.name || '—')}</span>
-            <span class="inv-card-campaign">${esc(inv.campaign || '')}</span>
+            <span class="inv-card-campaign">${esc([inv.campaign, fmtMonth(inv.campaignMonth)].filter(Boolean).join(' · '))}</span>
             <span class="inv-card-bottom"><span>${esc(fmtDateShort(inv.issueDate))} · due ${esc(fmtDateShort(inv.dueDate))}${dueRel(inv).replace('due-rel', 'due-rel inline')}</span><b>${t.value == null ? '—' : `${t.approx ? '≈' : ''}${fmtMoney(t.value, t.cur)}`}</b></span>
           </a>
           <div class="inv-card-actions">${statusSelect(inv)}${rowActions(inv)}</div>
@@ -412,12 +412,13 @@ function csvCell(v) {
 
 function exportCsv(list) {
   const today = todayISO();
-  const header = ['Invoice number', 'Status', 'Client', 'Campaign', 'Reference', 'Invoice date', 'Service date', 'Due date', 'Reminder', 'Currency', 'Total', 'Rate to EUR', 'Total EUR', 'Paid date', 'Received EUR'];
+  const header = ['Invoice number', 'Status', 'Client', 'Campaign', 'Campaign month', 'Reference', 'Invoice date', 'Service date', 'Due date', 'Reminder', 'Currency', 'Total', 'Rate to EUR', 'Total EUR', 'Paid date', 'Received EUR'];
   const rows = list.map((inv) => [
     inv.number,
     STATUS[effectiveStatus(inv, today)].label,
     inv.client?.name || '',
     inv.campaign,
+    fmtMonth(inv.campaignMonth),
     inv.reference,
     inv.issueDate,
     inv.serviceDate,
