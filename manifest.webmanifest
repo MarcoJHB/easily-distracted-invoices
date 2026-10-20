@@ -1,0 +1,9 @@
+{
+  "name": "Easily Distracted Invoices",
+  "short_name": "Invoices",
+  "start_url": "./#/invoices",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b3a2f",
+  "icons": [{ "src": "assets/logo.png", "sizes": "240x240", "type": "image/png", "purpose": "any" }]
+}

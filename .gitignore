@@ -1,0 +1,6 @@
+# Never commit personal data to the app repo
+data/
+*.ledger.json
+starter-ledger.json
+invoices-backup-*.json
+.DS_Store
