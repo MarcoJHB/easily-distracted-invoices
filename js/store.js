@@ -28,7 +28,7 @@ export function defaultLedger() {
         siret: '',
         vatNumber: '', // your intra-EU VAT number (FR..), needed to bill EU businesses
       },
-      bank: { accountName: '', accountNumber: '', iban: '', swift: '', bank: '' },
+      bank: { accountName: '', accountNumber: '', routingNumber: '', iban: '', swift: '', bank: '', wisetag: '' },
       invoice: {
         prefix: 'A',
         padding: 5,

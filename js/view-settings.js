@@ -120,6 +120,8 @@ export function renderSettings(root, { navigate, section = 'business' }) {
           ${p('settings.bank.bank', { label: 'Bank' })}
           ${p('settings.bank.iban', { label: 'IBAN', full: true, attrs: 'spellcheck="false"' })}
           ${p('settings.bank.swift', { label: 'SWIFT / BIC', attrs: 'spellcheck="false"' })}
+          ${p('settings.bank.routingNumber', { label: 'Routing number (ACH)', attrs: 'spellcheck="false"', hint: 'For USD account details, e.g. from Wise.' })}
+          ${p('settings.bank.wisetag', { label: 'Wisetag', placeholder: '@yourname', attrs: 'spellcheck="false"', hint: 'Lets clients on Wise pay you instantly and for free.' })}
           ${p('settings.bank.accountNumber', { label: 'Account number', hint: 'Optional, the IBAN usually covers it.' })}
         </div>
       </section>`,

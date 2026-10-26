@@ -85,9 +85,11 @@ export function renderInvoice(inv, settings) {
   const bankRows = [
     ['Account Name', bank.accountName],
     ['Account Number', bank.accountNumber],
+    ['Routing Number', bank.routingNumber],
     ['IBAN', bank.iban],
     ['SWIFT Code', bank.swift],
     ['Bank', bank.bank],
+    ['Wisetag', bank.wisetag],
   ].filter(([, v]) => v);
 
   const terms = termsLines(inv, settings);
