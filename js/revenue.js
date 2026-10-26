@@ -22,7 +22,7 @@ export function defaultTaxSettings() {
     versementLiberatoire: false,
     bncVl: 2.2,
     bicVl: 1.7,
-    period: 'quarterly', // 'monthly' | 'quarterly'
+    period: 'monthly', // 'monthly' | 'quarterly'
     vatThreshold: 37500, // franchise en base, services
     vatThresholdHigh: 41250, // seuil majoré
     microCeiling: 83600, // plafond micro, services
