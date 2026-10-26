@@ -76,6 +76,20 @@ These are on by default and editable in **Settings → Invoice & legal**:
 
 *I'm not a lawyer or an accountant. Have your accountant check the wording once.*
 
+## Revenue
+
+The **Revenue** page tracks money coming in and what to set aside for URSSAF.
+
+- **Monthly table:** AdSense, Sponsors, Total, BNC tax (AdSense), BIC tax (Sponsors), Tax total, plus bank fees and take-home. Click any amount to see the payments behind it.
+- **Chart:** month-by-month revenue, split into AdSense and sponsors. AdSense estimates are hatched.
+- **When received / When earned:** URSSAF counts money on the day it reaches your bank. AdSense earned in a month usually lands around the 21st of the next month.
+- **URSSAF declaration helper:** the next period to declare, its deadline, and the exact amounts (whole euros) for the BIC and BNC boxes, with copy buttons. Tick a period off as declared.
+- **Limits:** the VAT exemption threshold (€37,500 / €41,250) and the micro ceiling (€83,600), with a projection for the year.
+- **Import bank statement:** drop a CSV export. Sponsor payments, AdSense payments and the transfer fees linked to them are detected. Personal credits are skipped. Payments can be matched to unpaid invoices, which are then marked paid. Re-importing never duplicates anything.
+- **Rates:** in Settings → Tax & URSSAF. The 2026 defaults are BNC 25.6% + 0.2% CFP and BIC services 21.2% + 0.1% CFP, with an optional versement libératoire (2.2% / 1.7%).
+
+Paid invoices count as sponsor income automatically, so only add sponsor payments by hand when there's no invoice in the app.
+
 ## Files
 
 ```
@@ -88,6 +102,7 @@ js/github.js               GitHub Contents API
 js/rates.js                ECB exchange rates (Frankfurter)
 js/invoice.js              invoice template, PDF + print, file names
 js/invoice-actions.js      paid / reminders / duplicate / delete
+js/revenue.js              revenue maths, URSSAF periods, bank CSV parsing
 js/view-*.js               the screens
 js/signature.js            signature upload clean-up + drawing pad
 vendor/html2pdf.bundle.min.js   PDF generation (MIT)

@@ -11,6 +11,7 @@ const SECTIONS = [
   ['business', 'Your details'],
   ['bank', 'Bank'],
   ['invoice', 'Invoice & legal'],
+  ['tax', 'Tax & URSSAF'],
   ['signature', 'Signature'],
   ['files', 'PDF file names'],
   ['items', 'Saved items'],
@@ -175,6 +176,45 @@ export function renderSettings(root, { navigate, section = 'business' }) {
           </div>
         </div>
       </section>`,
+
+    tax: () => {
+      const t = s.tax;
+      const pct = { num: true, attrs: 'inputmode="decimal" step="0.1" min="0" max="60"', type: 'number' };
+      return `
+      <section class="card">
+        <h2>How your income is taxed</h2>
+        <p class="card-sub">Used for the URSSAF figures on the Revenue page. Check these against your URSSAF account once.</p>
+        <div class="grid2">
+          ${p('settings.tax.adsenseCategory', { label: 'AdSense is declared as', options: [['bnc', 'BNC (non-commercial)'], ['bic', 'BIC – prestations de services']] })}
+          ${p('settings.tax.sponsorCategory', { label: 'Sponsorships are declared as', options: [['bic', 'BIC – prestations de services'], ['bnc', 'BNC (non-commercial)']] })}
+          ${p('settings.tax.period', { label: 'You declare to URSSAF', options: [['quarterly', 'Every quarter'], ['monthly', 'Every month']] })}
+        </div>
+        <p class="fineprint">Sources don’t all agree on whether sponsorships are BIC or BNC for creators. Go with what your URSSAF registration says, and ask your accountant if unsure.</p>
+      </section>
+      <section class="card">
+        <h2>Contribution rates (${esc(t.ratesYear)})</h2>
+        <div class="grid2">
+          ${p('settings.tax.bncRate', { label: 'BNC social contributions %', ...pct, hint: '25.6% in 2026 (SSI, décret 2025-943).' })}
+          ${p('settings.tax.bicRate', { label: 'BIC services social contributions %', ...pct, hint: '21.2% in 2026.' })}
+          ${p('settings.tax.bncCfp', { label: 'BNC training contribution (CFP) %', ...pct, hint: '0.2%' })}
+          ${p('settings.tax.bicCfp', { label: 'BIC training contribution (CFP) %', ...pct, hint: '0.1% for commercial, 0.3% for artisans.' })}
+        </div>
+        <label class="check"><input type="checkbox" data-path="settings.tax.versementLiberatoire" ${t.versementLiberatoire ? 'checked' : ''}> I opted for the versement libératoire (income tax paid with URSSAF)</label>
+        <div class="grid2">
+          ${p('settings.tax.bncVl', { label: 'Versement libératoire BNC %', ...pct, hint: '2.2%' })}
+          ${p('settings.tax.bicVl', { label: 'Versement libératoire BIC services %', ...pct, hint: '1.7%' })}
+        </div>
+      </section>
+      <section class="card">
+        <h2>Limits</h2>
+        <div class="grid3">
+          ${p('settings.tax.vatThreshold', { label: 'VAT exemption threshold €', type: 'number', num: true, hint: '37,500 for services' })}
+          ${p('settings.tax.vatThresholdHigh', { label: 'VAT immediate threshold €', type: 'number', num: true, hint: '41,250' })}
+          ${p('settings.tax.microCeiling', { label: 'Micro ceiling €', type: 'number', num: true, hint: '83,600 for services' })}
+        </div>
+        <p class="fineprint">2026 figures. I’m not a tax adviser, so treat the results as estimates.</p>
+      </section>`;
+    },
 
     files: () => `
       <section class="card">

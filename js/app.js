@@ -6,6 +6,7 @@ import { renderInvoices } from './view-invoices.js';
 import { renderEditor } from './view-editor.js';
 import { renderClients } from './view-clients.js';
 import { renderSettings } from './view-settings.js';
+import { renderRevenue } from './view-revenue.js';
 import { getRate } from './rates.js';
 
 const app = document.getElementById('app');
@@ -145,7 +146,7 @@ function renderShell() {
       <aside class="side">
         <a class="brand" href="#/invoices"><img src="assets/logo.png" alt=""><span><b>Easily Distracted</b><small>Invoices</small></span></a>
         <nav class="nav" aria-label="Main">
-          ${NAV.map(([h, l, ic]) => `<a href="${h}" data-nav="${h}">${ic}<span>${l}</span>${h === '#/revenue' ? '<em>Soon</em>' : ''}</a>`).join('')}
+          ${NAV.map(([h, l, ic]) => `<a href="${h}" data-nav="${h}">${ic}<span>${l}</span></a>`).join('')}
         </nav>
         <div class="sync" data-role="sync" role="status" aria-live="polite"></div>
       </aside>
@@ -165,20 +166,6 @@ function renderShell() {
   });
 }
 
-function renderRevenue(root) {
-  root.innerHTML = `
-    <div class="page-head"><div><h1>Revenue</h1><p class="sub">Month-to-month income from YouTube, sponsors and everything else.</p></div></div>
-    <section class="card soon">
-      <h2>Coming next</h2>
-      <p>The invoice section comes first. Next up here:</p>
-      <ul>
-        <li>Enter your AdSense payout and any other income for each month</li>
-        <li>Paid sponsor invoices drop in automatically, in the euros you actually received</li>
-        <li>A month-by-month chart and a year-to-date total, with your micro-entrepreneur ceiling for reference</li>
-      </ul>
-      <a href="#/invoices" class="btn btn-soft">${icons.invoice}Go to invoices</a>
-    </section>`;
-}
 
 function route() {
   const hash = location.hash || '#/invoices';
@@ -215,7 +202,7 @@ function route() {
     cleanup = renderSettings(view, { ...ctx, section: parts[1] });
     title = 'Settings';
   } else if (top === 'revenue') {
-    renderRevenue(view);
+    cleanup = renderRevenue(view, ctx);
     title = 'Revenue';
   } else {
     if (top !== 'invoices') history.replaceState(null, '', '#/invoices');

@@ -3,6 +3,7 @@
 
 import { loadFile, saveFile, checkRepo, GitHubError } from './github.js';
 import { clone, round2, todayISO, uid, debounce, splitCampaignMonth } from './util.js';
+import { defaultTaxSettings, normalizeRevenue } from './revenue.js';
 
 const CONN_KEY = 'edg.connection.v1';
 const CACHE_KEY = 'edg.ledger.cache.v1';
@@ -47,6 +48,7 @@ export function defaultLedger() {
         signatureLabel: 'Authorised Signatory',
       },
       signature: null, // data URL (transparent PNG)
+      tax: defaultTaxSettings(),
       savedItems: [
         { id: 'item_integrated', title: 'Integrated Video (60-90s)', rate: 0, currency: 'USD' },
         { id: 'item_dedicated', title: 'Dedicated Video', rate: 0, currency: 'USD' },
@@ -74,13 +76,15 @@ export function migrate(data) {
   out.settings.business = { ...base.settings.business, ...(data?.settings?.business || {}) };
   out.settings.bank = { ...base.settings.bank, ...(data?.settings?.bank || {}) };
   out.settings.invoice = { ...base.settings.invoice, ...(data?.settings?.invoice || {}) };
+  out.settings.tax = { ...base.settings.tax, ...(data?.settings?.tax || {}) };
+  if (!Array.isArray(out.settings.tax.declared)) out.settings.tax.declared = [];
   const objs = (arr) => (Array.isArray(arr) ? arr.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : []);
   out.settings.savedItems = Array.isArray(data?.settings?.savedItems)
     ? objs(data.settings.savedItems).map((it) => ({ id: it.id || uid('item'), title: String(it.title ?? ''), rate: Number(it.rate) || 0, currency: it.currency === 'EUR' ? 'EUR' : 'USD' }))
     : base.settings.savedItems;
   out.clients = objs(out.clients).map((c) => ({ ...c, id: c.id || uid('cli'), name: String(c.name ?? 'Unnamed client') }));
   out.invoices = objs(out.invoices).map(normalizeInvoice);
-  out.revenue = objs(out.revenue);
+  out.revenue = objs(out.revenue).map(normalizeRevenue);
   out.version = SCHEMA_VERSION;
   return out;
 }
@@ -115,6 +119,8 @@ export function normalizeInvoice(inv) {
     notes: inv.notes || '',
     paidDate: inv.paidDate || '',
     paidAmountEur: inv.paidAmountEur ?? null,
+    paidFees: Number(inv.paidFees) || 0, // bank fees taken off this payment (EUR)
+    bankRef: inv.bankRef || '',
     remindersSent: Array.isArray(inv.remindersSent) ? inv.remindersSent : [],
     createdAt: inv.createdAt || new Date().toISOString(),
     updatedAt: inv.updatedAt || new Date().toISOString(),

@@ -697,6 +697,8 @@ export function renderEditor(root, { navigate, id, params, setGuard }) {
         if (!ok) return;
         inv.paidDate = '';
         inv.paidAmountEur = null;
+        inv.paidFees = 0;
+        inv.bankRef = '';
       }
       inv.status = v;
       if (v === 'waiting' && !inv.reminderDate) {

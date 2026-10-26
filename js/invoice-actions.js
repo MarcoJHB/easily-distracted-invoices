@@ -33,6 +33,7 @@ export async function markPaid(inv) {
         attrs: 'inputmode="decimal"',
         hint: inv.currency === 'USD' ? 'Use the amount that actually landed in your bank. That is what counts for your URSSAF declaration and the revenue dashboard.' : '',
       })}
+      ${field({ label: 'Bank fees on this payment (EUR)', name: 'paidFees', value: inv.paidFees || '', placeholder: '0.00', attrs: 'inputmode="decimal"', hint: 'Optional. International transfers often cost €30+. Tracked on the Revenue page.' })}
     </div>
     ${inv.currency === 'USD' ? '<button type="button" class="link-btn" data-role="paidrate">Use the ECB rate on the date received</button>' : ''}`;
   const res = await modal({
@@ -72,6 +73,7 @@ export async function markPaid(inv) {
   inv.status = 'paid';
   inv.paidDate = res.paidDate;
   inv.paidAmountEur = round2(parseNumber(res.paidAmountEur));
+  inv.paidFees = round2(Math.abs(parseNumber(res.paidFees)));
   save(inv);
   toast(`${inv.number} marked as paid 🎉`);
   return true;
@@ -93,6 +95,8 @@ export async function setStatus(inv, status) {
   if (prev.status === 'paid') {
     inv.paidDate = '';
     inv.paidAmountEur = null;
+    inv.paidFees = 0;
+    inv.bankRef = '';
   }
   save(inv);
   toast(`${inv.number} → ${status === 'waiting' ? 'Waiting for payment' : 'New'}`, {
