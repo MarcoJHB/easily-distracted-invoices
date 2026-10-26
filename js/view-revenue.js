@@ -172,6 +172,7 @@ export function renderRevenue(root, { navigate }) {
           ${line('bnc', a.bnc, srcFor('bnc'))}
           <div class="decl-row decl-total"><span>Contributions to pay</span><span class="decl-amt"><b>≈ ${eur(a.contributions)}</b></span></div>
         </div>
+        ${a.alreadyDeclared ? `<p class="fineprint">${eur(a.alreadyDeclared)} of AdSense received in this period isn’t included: you already declared it by month earned, before switching to month received.</p>` : ''}
         ${a.estimated ? '<p class="warnbox small">These AdSense figures are YouTube estimates. Before you declare, replace them with what Google actually paid (AdSense → Payments).</p>' : ''}
         <div class="btn-row">
           <button type="button" class="btn btn-soft btn-sm" data-act="declared" data-key="${esc(info.key)}">${icons.check}Mark ${esc(info.label)} as declared</button>

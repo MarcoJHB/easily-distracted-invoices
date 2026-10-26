@@ -29,6 +29,7 @@ export function defaultTaxSettings() {
     declared: [], // periods marked as declared, e.g. "2026-Q3" or "2026-09"
     startMonth: '', // registered as micro-entrepreneur since (YYYY-MM); nothing before counts
     bankStatements: [], // [{ from, to }] date ranges covered by imported bank statements
+    earnedBasisUntil: '', // YYYY-MM: AdSense earned up to this month was already declared by month earned
   };
 }
 
@@ -250,8 +251,16 @@ export function declarationAmounts(data, info) {
   const rows = monthlyRows(data, { months: info.months, view: 'received' });
   const t = sumRows(rows);
   const tax = data.settings.tax;
+  // AdSense you already declared under the old "month earned" method isn't declared again
+  let already = 0;
+  if (tax.earnedBasisUntil) {
+    for (const it of incomeItems(data)) {
+      if (it.type === 'adsense' && info.months.includes(it.received) && it.earned <= tax.earnedBasisUntil) already += it.amount;
+    }
+  }
+  already = round2(already);
   const byCat = { bic: 0, bnc: 0 };
-  byCat[tax.adsenseCategory] += t.adsense;
+  byCat[tax.adsenseCategory] += t.adsense - already;
   byCat[tax.sponsorCategory] += t.sponsor;
   const bic = Math.round(byCat.bic); // URSSAF takes whole euros
   const bnc = Math.round(byCat.bnc);
@@ -262,6 +271,7 @@ export function declarationAmounts(data, info) {
     estimated: t.estimated,
     adsense: t.adsense,
     sponsor: t.sponsor,
+    alreadyDeclared: already,
   };
 }
 
