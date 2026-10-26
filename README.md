@@ -85,6 +85,9 @@ The **Revenue** page tracks money coming in and what to set aside for URSSAF.
 - **When received / When earned:** URSSAF counts money on the day it reaches your bank. AdSense earned in a month usually lands around the 21st of the next month.
 - **URSSAF declaration helper:** the next period to declare, its deadline, and the exact amounts (whole euros) for the BIC and BNC boxes, with copy buttons. Tick a period off as declared.
 - **Limits:** the VAT exemption threshold (€37,500 / €41,250) and the micro ceiling (€83,600), with a projection for the year.
+- **Import YouTube revenue:** drop the CSV from YouTube Studio (Analytics → Revenue → Advanced mode → by month → export). Each month becomes an AdSense estimate. Months that already hold a real paid amount are left alone.
+- **Year filter:** 2026, 2025… or Lifetime, starting from the month you registered (Settings → Tax & URSSAF).
+- **What's missing:** lists months with no AdSense, months not covered by a bank statement, estimates still waiting for the real payment, and gaps in your invoice numbers.
 - **Import bank statement:** drop a CSV export. Sponsor payments, AdSense payments and the transfer fees linked to them are detected. Personal credits are skipped. Payments can be matched to unpaid invoices, which are then marked paid. Re-importing never duplicates anything.
 - **Rates:** in Settings → Tax & URSSAF. The 2026 defaults are BNC 25.6% + 0.2% CFP and BIC services 21.2% + 0.1% CFP, with an optional versement libératoire (2.2% / 1.7%).
 

@@ -5,7 +5,8 @@ import {
 } from './util.js';
 import { icons, modal, field, formValues, toast, confirmDialog } from './ui.js';
 import {
-  monthlyRows, sumRows, monthsFor, yearsWithData, monthLabel, MONTHS_SHORT, addMonths, monthOf,
+  monthlyRows, sumRows, monthsFor, chartMonthsFor, yearsWithData, monthLabel, MONTHS_SHORT, addMonths, monthOf,
+  parseYouTubeCsv, coverage, addStatementPeriod, periodsBefore,
   incomeItems, nextDeclaration, declarationAmounts, expectedIncome, sourceRate, normalizeRevenue,
   parseBankCsv, detectIncome, matchInvoice, projection, isMonth,
 } from './revenue.js';
@@ -21,7 +22,7 @@ const catLabel = (cat) => (cat === 'bnc' ? 'BNC' : 'BIC');
 export function renderRevenue(root, { navigate }) {
   const prefs = loadPrefs();
   const state = {
-    year: prefs.year || todayISO().slice(0, 4),
+    year: prefs.year && prefs.year !== 'last12' ? prefs.year : todayISO().slice(0, 4),
     view: prefs.view === 'earned' ? 'earned' : 'received',
   };
   const persist = () => savePrefs({ year: state.year, view: state.view });
@@ -33,26 +34,21 @@ export function renderRevenue(root, { navigate }) {
         <p class="sub">AdSense and sponsor income, what to set aside for URSSAF, and what’s left.</p>
       </div>
       <div class="head-actions">
-        <button class="btn btn-ghost" data-act="import">${icons.upload}<span>Import bank statement</span></button>
+        <button class="btn btn-ghost" data-act="import">${icons.upload}<span>Import CSV</span></button>
         <button class="btn btn-primary" data-act="add">${icons.plus}Add income</button>
       </div>
     </div>
-    <div class="toolbar">
-      <select data-role="year" aria-label="Year"></select>
+    <div class="toolbar rev-filters">
+      <div class="seg year-seg" role="group" aria-label="Period" data-role="years"></div>
       <div class="seg" role="group" aria-label="Count income by">
         <button data-view="received" title="The month the money reached your bank. This is what URSSAF uses.">When received</button>
         <button data-view="earned" title="The month the views or the campaign happened.">When earned</button>
       </div>
       <span class="toolbar-note" data-role="viewnote"></span>
     </div>
-    <div class="stats rev-stats" data-role="stats"></div>
-    <div class="rev-grid">
-      <section class="card decl" data-role="decl" aria-labelledby="decl-h"></section>
-      <section class="card limits" data-role="limits" aria-labelledby="limits-h"></section>
-    </div>
     <section class="card chart-card" aria-labelledby="chart-h">
       <div class="card-head">
-        <h2 id="chart-h">Month by month</h2>
+        <h2 id="chart-h" data-role="charttitle">Revenue by month</h2>
         <div class="legend" aria-hidden="true">
           <span><i class="sw sw-adsense"></i>AdSense</span>
           <span><i class="sw sw-sponsor"></i>Sponsors</span>
@@ -61,6 +57,12 @@ export function renderRevenue(root, { navigate }) {
       </div>
       <div class="chart" data-role="chart"></div>
     </section>
+    <div class="stats rev-stats" data-role="stats"></div>
+    <section class="card coverage" data-role="coverage" aria-labelledby="cov-h"></section>
+    <div class="rev-grid">
+      <section class="card decl" data-role="decl" aria-labelledby="decl-h"></section>
+      <section class="card limits" data-role="limits" aria-labelledby="limits-h"></section>
+    </div>
     <section class="card table-card" aria-labelledby="table-h">
       <div class="card-head">
         <h2 id="table-h">Monthly breakdown</h2>
@@ -77,13 +79,15 @@ export function renderRevenue(root, { navigate }) {
   function compute() {
     const months = monthsFor(store.data, state.year, state.view);
     const rows = monthlyRows(store.data, { months, view: state.view });
-    return { months, rows, total: sumRows(rows) };
+    const chartRows = monthlyRows(store.data, { months: chartMonthsFor(store.data, state.year, state.view), view: state.view });
+    return { months, rows, chartRows, total: sumRows(rows) };
   }
 
   // ---------- stats ----------
   function drawStats({ total }) {
     const exp = expectedIncome(store.data);
-    const label = state.year === 'last12' ? 'last 12 months' : state.year;
+    const start = store.data.settings.tax.startMonth;
+    const label = state.year === 'lifetime' ? (start ? `since ${monthLabel(start, true)}` : 'all time') : state.year;
     q('[data-role=stats]').innerHTML = `
       <div class="stat stat-hero">
         <span class="stat-label">Revenue · ${esc(label)}</span>
@@ -105,6 +109,38 @@ export function renderRevenue(root, { navigate }) {
         <span class="stat-value">${eur(exp.total)}</span>
         <span class="stat-note">${[exp.count ? `${exp.count} unpaid invoice${exp.count === 1 ? '' : 's'}` : '', exp.adsense ? `${eur(exp.adsense)} AdSense on its way` : ''].filter(Boolean).join(' · ') || 'Nothing pending'}${exp.noRate ? ` (+${exp.noRate} without a rate)` : ''}</span>
       </a>`;
+  }
+
+  // ---------- what's missing ----------
+  function drawCoverage() {
+    const el = q('[data-role=coverage]');
+    const c = coverage(store.data);
+    if (c.needsStart) {
+      el.innerHTML = `
+        <div class="card-head"><h2 id="cov-h">When did you register?</h2></div>
+        <p class="modal-text">Pick the month you became a micro-entrepreneur. Income before it isn’t counted for URSSAF, and the dashboard starts there.</p>
+        <div class="row start-row"><input type="month" data-role="startmonth" aria-label="Registration month" value="2025-01"><button type="button" class="btn btn-primary btn-sm" data-act="setStart">Save</button></div>`;
+      return;
+    }
+    const item = (ok, title, text, action = '') => `<li class="${ok ? 'ok' : 'todo'}"><span class="cov-ic" aria-hidden="true">${ok ? icons.check : '!'}</span><span><b>${title}</b><small>${text}</small></span>${action}</li>`;
+    const L = (m) => monthLabel(m, true);
+    const st = c.statements.map((p) => `${fmtDate(p.from)} – ${fmtDate(p.to)}`).join(', ');
+    const items = [
+      item(!c.adsMissingCount, 'AdSense months',
+        c.adsMissingCount ? `No AdSense recorded for ${esc(c.adsMissing)}.` : `Every month since ${esc(L(addMonths(c.start, -1)))} is in.`,
+        c.adsMissingCount ? '<button type="button" class="btn btn-ghost btn-sm" data-act="import">Import YouTube CSV</button>' : ''),
+      item(!c.adsEstimatedCount, 'Real AdSense payments',
+        c.adsEstimatedCount ? `${c.adsEstimatedCount} of ${c.adsReceivedCount} months still use YouTube’s estimates. Google’s actual payments usually differ by a few euros; add them (AdSense → Payments) for exact URSSAF figures.` : 'All AdSense months use the real paid amounts.'),
+      item(!c.sponsorGapCount, 'Sponsor payments',
+        c.sponsorGapCount ? `No bank statement or paid invoice covers ${esc(c.sponsorGaps)}. Any sponsor money from those months is missing.${st ? ` Imported so far: ${esc(st)}.` : ''}` : 'Every month since you registered is covered by a bank statement or a paid invoice.',
+        c.sponsorGapCount ? '<button type="button" class="btn btn-ghost btn-sm" data-act="import">Import bank statement</button>' : ''),
+      item(!c.invoiceGapCount, 'Past invoices',
+        c.invoiceGapCount ? `${esc(c.invoiceGapText)} ${c.invoiceGapCount === 1 ? 'isn’t' : 'aren’t'} in the app. Add them if you want them in the tracker (their payments still count once imported from your bank).` : 'Your invoice numbers have no gaps.'),
+    ];
+    const todo = [c.adsMissingCount, c.adsEstimatedCount, c.sponsorGapCount, c.invoiceGapCount].filter(Boolean).length;
+    el.innerHTML = `
+      <div class="card-head"><h2 id="cov-h">${todo ? 'What’s missing' : 'Your data is complete'}</h2><span class="chip-soft">Since ${esc(monthLabel(c.start))} · <a href="#/settings/tax">change</a></span></div>
+      <ul class="cov-list">${items.join('')}</ul>`;
   }
 
   // ---------- URSSAF declaration ----------
@@ -141,14 +177,14 @@ export function renderRevenue(root, { navigate }) {
           <button type="button" class="btn btn-soft btn-sm" data-act="declared" data-key="${esc(info.key)}">${icons.check}Mark ${esc(info.label)} as declared</button>
           <a class="link-btn" href="https://autoentrepreneur.urssaf.fr" target="_blank" rel="noopener">Open URSSAF</a>
         </div>`}
-      ${next.overdue?.length ? `<p class="fineprint">Not ticked off yet: ${next.overdue.map((p) => `<button type="button" class="link-btn" data-act="declared" data-key="${esc(p.key)}">${esc(p.label)}</button>`).join(', ')}. Tick them off if you already declared them.</p>` : ''}
+      ${next.overdue?.length ? `<p class="fineprint">Not ticked off yet: ${next.overdue.map((p) => `<button type="button" class="link-btn" data-act="declared" data-key="${esc(p.key)}">${esc(p.label)}</button>`).join(', ')}. ${data.settings.tax.startMonth ? `<button type="button" class="link-btn" data-act="declareAll" data-key="${esc(info.key)}">I declared everything before ${esc(info.label)}</button>` : 'Tick them off if you already declared them.'}</p>` : ''}
       <p class="fineprint">Amounts count money by the day it reached your bank, rounded to whole euros as URSSAF asks.</p>`;
   }
 
   // ---------- limits ----------
   function drawLimits({ rows }) {
     const tax = store.data.settings.tax;
-    const year = state.year === 'last12' ? todayISO().slice(0, 4) : state.year;
+    const year = state.year === 'lifetime' ? todayISO().slice(0, 4) : state.year;
     const yRows = monthlyRows(store.data, { months: Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`), view: 'received' });
     const proj = projection(yRows, year);
     const ytd = proj.ytd;
@@ -186,14 +222,14 @@ export function renderRevenue(root, { navigate }) {
   }
   const kfmt = (n) => (n >= 1000 ? `€${(n / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })}k` : `€${n}`);
 
-  function drawChart({ rows }) {
+  function drawChart({ chartRows: rows }) {
     const host = q('[data-role=chart]');
     const W = Math.max(300, host.clientWidth || 600);
     const H = 260;
     const m = { l: 46, r: 10, t: 26, b: 30 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     if (!rows.length || rows.every((r) => r.total === 0)) {
-      host.innerHTML = `<div class="empty small"><p>No income ${state.year === 'last12' ? 'in the last 12 months' : `in ${esc(state.year)}`} yet. Add your AdSense months or import a bank statement.</p><button class="btn btn-soft btn-sm" data-act="add">${icons.plus}Add income</button></div>`;
+      host.innerHTML = `<div class="empty small"><p>No income ${state.year === 'lifetime' ? 'recorded' : `in ${esc(state.year)}`} yet. Import your YouTube revenue CSV or a bank statement, or add income by hand.</p><button class="btn btn-soft btn-sm" data-act="add">${icons.plus}Add income</button></div>`;
       return;
     }
     const { max, step } = niceScale(Math.max(...rows.map((r) => r.total)));
@@ -218,6 +254,8 @@ export function renderRevenue(root, { navigate }) {
       const aTop = base - hA;
       const sTop = aTop - gap - hS;
       const aIsTop = r.sponsor <= 0;
+      const future = r.month > today;
+      if (future && r.total > 0) bars += '<g class="future">';
       const est = r.estimated;
       if (hA > 0) {
         const d = aIsTop ? roundTop(x, aTop, bw, hA, 4) : `M${x},${aTop}h${bw}v${hA}h${-bw}Z`;
@@ -225,9 +263,15 @@ export function renderRevenue(root, { navigate }) {
         if (est) bars += `<path d="${d}" fill="url(#hatch)"/>`;
       }
       if (hS > 0) bars += `<path d="${roundTop(x, sTop, bw, hS, 4)}" class="bar-sponsor"/>`;
+      if (future && r.total > 0) bars += '</g>';
       // labels
-      const lab = MONTHS_SHORT[Number(r.month.slice(5, 7)) - 1] + (rows.length > 12 || r.month.slice(5, 7) === '01' || i === 0 ? ` ${r.month.slice(2, 4)}` : '');
-      bars += `<text x="${cx}" y="${H - 10}" class="ax-x${r.month === today ? ' now' : ''}" text-anchor="middle">${esc(lab)}</text>`;
+      const mi = Number(r.month.slice(5, 7)) - 1;
+      const many = rows.length > 12;
+      const every = band < 34 ? 3 : 1; // thin bars: label every quarter
+      if (!many || mi % every === 0) {
+        const lab = MONTHS_SHORT[mi] + (many && (mi === 0 || i === 0) ? ` ${r.month.slice(2, 4)}` : '');
+        bars += `<text x="${cx}" y="${H - 10}" class="ax-x${r.month === today ? ' now' : ''}" text-anchor="middle">${esc(lab)}</text>`;
+      }
       if (r === best && r.total > 0) bars += `<text x="${cx}" y="${y(r.total) - 7}" class="bar-val" text-anchor="middle">${esc(kfmt(Math.round(r.total)))}</text>`;
       bars += `<rect x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ph}" class="hit" data-i="${i}" tabindex="0" aria-label="${esc(monthLabel(r.month))}: ${eur(r.total)}"/>`;
     });
@@ -245,7 +289,7 @@ export function renderRevenue(root, { navigate }) {
     const show = (i) => {
       const r = rows[i];
       hl.innerHTML = `<rect x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ph}" class="band"/>`;
-      tip.innerHTML = `<b>${esc(monthLabel(r.month))}</b>
+      tip.innerHTML = `<b>${esc(monthLabel(r.month))}${r.month > monthOf(todayISO()) ? ' · expected' : ''}</b>
         <span><i class="sw sw-adsense"></i>AdSense<em>${eur(r.adsense)}${r.estimated ? ' est.' : ''}</em></span>
         <span><i class="sw sw-sponsor"></i>Sponsors<em>${eur(r.sponsor)}</em></span>
         <span class="tip-total">Total<em>${eur(r.total)}</em></span>
@@ -342,16 +386,16 @@ export function renderRevenue(root, { navigate }) {
 
   function draw() {
     const years = yearsWithData(store.data);
-    if (state.year !== 'last12' && !years.includes(state.year)) state.year = years[0];
-    const sel = q('[data-role=year]');
-    sel.innerHTML = `${years.map((y) => `<option value="${y}">${y}</option>`).join('')}<option value="last12">Last 12 months</option>`;
-    sel.value = state.year;
+    if (state.year !== 'lifetime' && !years.includes(state.year)) state.year = years[0];
+    q('[data-role=years]').innerHTML = [...years, 'lifetime'].map((y) => `<button type="button" data-year="${y}" aria-pressed="${y === state.year}">${y === 'lifetime' ? 'Lifetime' : y}</button>`).join('');
+    q('[data-role=charttitle]').textContent = state.year === 'lifetime' ? 'Revenue by month, lifetime' : `Revenue by month, ${state.year}`;
     root.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === state.view)));
     q('[data-role=viewnote]').textContent = state.view === 'received'
       ? 'Counted on the day the money arrived, as URSSAF does. AdSense usually lands the month after.'
       : 'Counted in the month the views or campaign happened.';
     const c = compute();
     drawStats(c);
+    drawCoverage();
     drawDecl();
     drawLimits(c);
     drawChart(c);
@@ -362,8 +406,9 @@ export function renderRevenue(root, { navigate }) {
   let lastC = null;
 
   // ---------- events ----------
-  q('[data-role=year]').addEventListener('change', (e) => { state.year = e.target.value; persist(); draw(); });
   root.addEventListener('click', async (e) => {
+    const yb = e.target.closest('[data-year]');
+    if (yb) { state.year = yb.dataset.year; persist(); draw(); return; }
     const v = e.target.closest('[data-view]');
     if (v) { state.view = v.dataset.view; persist(); draw(); return; }
     const cellBtn = e.target.closest('.cell-btn');
@@ -378,6 +423,20 @@ export function renderRevenue(root, { navigate }) {
     switch (btn.dataset.act) {
       case 'add': editEntry(null); break;
       case 'import': importDialog(); break;
+      case 'declareAll': {
+        const keys = periodsBefore(store.data, btn.dataset.key);
+        const before = clone(store.data.settings.tax.declared);
+        store.update((d) => { d.settings.tax.declared = [...new Set([...d.settings.tax.declared, ...keys])]; });
+        toast(`${keys.length} earlier period${keys.length === 1 ? '' : 's'} marked as declared`, { action: { label: 'Undo', fn: () => store.update((d) => { d.settings.tax.declared = before; }) } });
+        break;
+      }
+      case 'setStart': {
+        const val = q('[data-role=startmonth]')?.value;
+        if (!isMonth(val)) { toast('Pick the month you registered', { type: 'error' }); return; }
+        store.update((d) => { d.settings.tax.startMonth = val; });
+        toast(`Counting from ${monthLabel(val)}`);
+        break;
+      }
       case 'declared': {
         const key = btn.dataset.key;
         store.update((d) => { if (!d.settings.tax.declared.includes(key)) d.settings.tax.declared.push(key); });
@@ -536,11 +595,41 @@ const alreadyIn = (f) => isImported(f.ref) || sameMoney(f);
 async function importDialog() {
   let found = null; // detected rows
   let jsonEntries = null;
+  let yt = null; // YouTube Studio revenue export
   let period = null;
+  const ytPlan = () => {
+    const start = store.data.settings.tax.startMonth || '';
+    return yt.months.map((m) => {
+      const ex = store.data.revenue.find((x) => x.type === 'adsense' && x.earnedMonth === m.month);
+      const paidIn = addMonths(m.month, 1);
+      let action = 'new';
+      if (ex && !ex.estimated) action = 'keep'; // a real paid amount wins over an estimate
+      else if (ex && Math.abs(ex.amount - m.amount) < 0.01) action = 'same';
+      else if (ex) action = 'update';
+      return { ...m, ex, action, before: start && paidIn < start };
+    });
+  };
   const render = (el) => {
     const out = el.querySelector('[data-role=result]');
+    if (yt) {
+      const plan = ytPlan();
+      const n = (a) => plan.filter((p) => p.action === a).length;
+      const before = plan.filter((p) => p.before).length;
+      const total = plan.reduce((s, p) => s + p.amount, 0);
+      const label = { new: 'New', update: 'Updates estimate', same: 'Already in', keep: 'Kept (real payment in app)' };
+      out.innerHTML = `
+        <p class="modal-text">YouTube revenue export: <b>${plan.length} months</b> (${esc(monthLabel(plan[0].month, true))} – ${esc(monthLabel(plan[plan.length - 1].month, true))}), ${eur(total)} in total. ${n('new')} new, ${n('update')} updated, ${n('same') + n('keep')} unchanged.${before ? ` ${before} month${before === 1 ? ' was' : 's were'} paid before you registered, so ${before === 1 ? 'it’s' : 'they’re'} kept for reference but not counted.` : ''}</p>
+        <div class="imp-wrap"><table class="imp-table"><thead><tr><th>Earned</th><th class="num">Amount</th><th>In the app</th></tr></thead><tbody>
+          ${plan.slice().reverse().map((p) => `<tr class="${p.action === 'same' || p.action === 'keep' ? 'done' : ''}"><td>${esc(monthLabel(p.month))}${p.before ? '<small>before registration</small>' : ''}</td><td class="num"><b>${eur(p.amount)}</b>${p.action === 'update' ? `<small class="was">was ${eur(p.ex.amount)}</small>` : ''}</td><td>${esc(label[p.action])}</td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="fineprint">These are YouTube’s estimates by the month the views happened. Each one counts for URSSAF in the following month, when Google pays.</p>`;
+      const go = el.querySelector('[data-role=go]');
+      const k = n('new') + n('update');
+      go.textContent = k ? `Import ${k} month${k === 1 ? '' : 's'}` : 'Nothing new to import';
+      return;
+    }
     if (jsonEntries) {
-      const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
+      const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id || (x.type === 'adsense' && r.type === 'adsense' && r.earnedMonth === x.earnedMonth && (!r.estimated || x.estimated))) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
       out.innerHTML = `<p class="modal-text">This file has <b>${jsonEntries.length}</b> income entries${fresh.length < jsonEntries.length ? `, ${jsonEntries.length - fresh.length} already in the app` : ''}.</p>
         <ul class="pay-list">${fresh.map((x) => `<li><span class="pay-main"><b>${eur(x.amount)}</b><small>${x.type === 'adsense' ? `AdSense earned ${esc(monthLabel(x.earnedMonth))}${x.estimated ? ' (estimate)' : ''}` : `${esc(x.payer || 'Sponsor')} · ${esc(fmtDate(x.receivedDate))}${x.fees ? ` · ${eur(x.fees)} fees` : ''}`}</small></span></li>`).join('')}</ul>`;
       return;
@@ -573,18 +662,22 @@ async function importDialog() {
     el.querySelector('[data-role=go]').textContent = todo.length ? `Import ${todo.length} payment${todo.length === 1 ? '' : 's'}` : 'Nothing new to import';
   };
   const res = await modal({
-    title: 'Import bank statement',
+    title: 'Import CSV',
     wide: true,
     body: `
-      <p class="modal-text">Export your statement as <b>CSV</b> from your bank’s website and drop it here. Nothing leaves your browser except what you choose to import.</p>
+      <p class="modal-text">Drop in either file. The app works out which one it is.</p>
+      <ul class="imp-kinds">
+        <li><b>YouTube revenue:</b> YouTube Studio → Analytics → Revenue → Advanced mode, set the period, group by month, then export as CSV.</li>
+        <li><b>Bank statement:</b> the CSV export from your bank’s website. Sponsor payments and their transfer fees are picked out, and personal spending is ignored.</li>
+      </ul>
       <label class="dropzone small" data-role="drop">
         <input type="file" accept=".csv,text/csv,.json,application/json" class="sr-only" data-role="file">
-        ${icons.upload}<b>Choose a CSV file</b><span>or drop it here · also accepts a revenue .json file</span>
+        ${icons.upload}<b>Choose a CSV file</b><span>or drop it here · nothing leaves your browser until you import</span>
       </label>
       <div data-role="result"></div>`,
     actions: [
       { label: 'Cancel', value: null, kind: 'ghost' },
-      { label: 'Import', value: 'go', kind: 'primary', submit: true, validate: () => (!found && !jsonEntries ? 'Choose a file first.' : '') },
+      { label: 'Import', value: 'go', kind: 'primary', submit: true, validate: () => (!found && !jsonEntries && !yt ? 'Choose a file first.' : '') },
     ],
     onMount: (el) => {
       el.querySelector('.modal-foot .btn-primary').dataset.role = 'go';
@@ -599,7 +692,19 @@ async function importDialog() {
             if (!Array.isArray(list)) throw new Error('This JSON has no revenue entries.');
             jsonEntries = list.filter((x) => x && typeof x === 'object').map(normalizeRevenue);
             found = null;
+            yt = null;
           } else {
+            yt = parseYouTubeCsv(text);
+            if (yt) {
+              if (yt.currency !== 'EUR') throw new Error(`This export is in ${yt.currency}. Switch YouTube Studio to show revenue in EUR and export again.`);
+              found = null;
+              jsonEntries = null;
+              el.querySelector('.modal-error').hidden = true;
+              el.querySelector('[data-role=drop]').classList.add('loaded');
+              el.querySelector('[data-role=drop] b').textContent = file.name;
+              render(el);
+              return;
+            }
             const parsed = parseBankCsv(text);
             period = parsed.period;
             found = detectIncome(parsed, store.data).map((f) => {
@@ -642,15 +747,35 @@ async function importDialog() {
     },
   });
   if (res !== 'go') return;
+  if (yt) {
+    const plan = ytPlan().filter((p) => p.action === 'new' || p.action === 'update');
+    const now = new Date().toISOString();
+    store.update((d) => {
+      for (const p of plan) {
+        const ex = d.revenue.find((x) => x.type === 'adsense' && x.earnedMonth === p.month);
+        if (ex) Object.assign(ex, { amount: p.amount, estimated: true, source: 'youtube', updatedAt: now });
+        else d.revenue.push(normalizeRevenue({ type: 'adsense', earnedMonth: p.month, amount: p.amount, estimated: true, payer: 'YouTube AdSense', note: 'YouTube Studio estimate', source: 'youtube', updatedAt: now }));
+      }
+    });
+    toast(plan.length ? `Imported ${plan.length} AdSense month${plan.length === 1 ? '' : 's'}` : 'Nothing new to import');
+    return;
+  }
   if (jsonEntries) {
-    const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
-    store.update((d) => { d.revenue.push(...fresh); });
+    const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id || (x.type === 'adsense' && r.type === 'adsense' && r.earnedMonth === x.earnedMonth && (!r.estimated || x.estimated))) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
+    store.update((d) => {
+      for (const x of fresh) {
+        // a real AdSense payment replaces the estimate for that month
+        if (x.type === 'adsense') d.revenue = d.revenue.filter((r) => !(r.type === 'adsense' && r.earnedMonth === x.earnedMonth));
+        d.revenue.push(x);
+      }
+    });
     toast(`Imported ${fresh.length} income entr${fresh.length === 1 ? 'y' : 'ies'}`);
     return;
   }
   const todo = found.filter((f) => f.kind !== 'skip' && !alreadyIn(f));
   let invoicesPaid = 0, added = 0, replaced = 0;
   store.update((d) => {
+    if (period) d.settings.tax.bankStatements = addStatementPeriod(d.settings.tax.bankStatements, period[0], period[1]);
     for (const f of todo) {
       if (f.kind === 'sponsor' && f.invoiceId) {
         const inv = d.invoices.find((i) => i.id === f.invoiceId);
@@ -681,5 +806,5 @@ async function importDialog() {
   if (added) parts.push(`${added} payment${added === 1 ? '' : 's'} added`);
   if (invoicesPaid) parts.push(`${invoicesPaid} invoice${invoicesPaid === 1 ? '' : 's'} marked paid`);
   if (replaced) parts.push(`${replaced} AdSense estimate${replaced === 1 ? '' : 's'} replaced with the real amount`);
-  toast(parts.join(' · ') || 'Nothing new to import', { timeout: 7000 });
+  toast(parts.join(' · ') || (period ? `No new payments. Statement ${fmtDate(period[0])} – ${fmtDate(period[1])} marked as checked.` : 'Nothing new to import'), { timeout: 7000 });
 }

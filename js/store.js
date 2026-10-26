@@ -69,6 +69,20 @@ export function isLedgerShape(data) {
   return true;
 }
 
+// One AdSense entry per earned month: a real paid amount beats an estimate, then the newest edit.
+export function dedupeAdsense(list) {
+  const best = new Map();
+  for (const e of list) {
+    if (e.type !== 'adsense') continue;
+    const cur = best.get(e.earnedMonth);
+    const better = !cur
+      || (cur.estimated && !e.estimated)
+      || (cur.estimated === e.estimated && (e.updatedAt || '') > (cur.updatedAt || ''));
+    if (better) best.set(e.earnedMonth, e);
+  }
+  return list.filter((e) => e.type !== 'adsense' || best.get(e.earnedMonth) === e);
+}
+
 export function migrate(data) {
   const base = defaultLedger();
   const out = { ...base, ...(data || {}) };
@@ -84,7 +98,7 @@ export function migrate(data) {
     : base.settings.savedItems;
   out.clients = objs(out.clients).map((c) => ({ ...c, id: c.id || uid('cli'), name: String(c.name ?? 'Unnamed client') }));
   out.invoices = objs(out.invoices).map(normalizeInvoice);
-  out.revenue = objs(out.revenue).map(normalizeRevenue);
+  out.revenue = dedupeAdsense(objs(out.revenue).map(normalizeRevenue));
   out.version = SCHEMA_VERSION;
   return out;
 }

@@ -27,6 +27,8 @@ export function defaultTaxSettings() {
     vatThresholdHigh: 41250, // seuil majoré
     microCeiling: 83600, // plafond micro, services
     declared: [], // periods marked as declared, e.g. "2026-Q3" or "2026-09"
+    startMonth: '', // registered as micro-entrepreneur since (YYYY-MM); nothing before counts
+    bankStatements: [], // [{ from, to }] date ranges covered by imported bank statements
   };
 }
 
@@ -117,12 +119,14 @@ function emptyRow(month) {
 // Month rows for a year (or a list of months), by 'received' or 'earned' month.
 export function monthlyRows(data, { months, view = 'received' }) {
   const tax = data.settings.tax;
-  const map = new Map(months.map((m) => [m, emptyRow(m)]));
+  const start = tax.startMonth || '';
+  const map = new Map(months.map((m) => [m, { ...emptyRow(m), adsenseTaxable: 0, sponsorTaxable: 0 }]));
   for (const it of incomeItems(data)) {
     const m = view === 'earned' ? it.earned : it.received;
     const row = map.get(m);
     if (!row) continue;
     row[it.type] += it.amount;
+    if (!start || it.received >= start) row[`${it.type}Taxable`] += it.amount;
     row.fees += it.fees;
     row.count++;
     if (it.estimated) row.estimated = true;
@@ -131,8 +135,8 @@ export function monthlyRows(data, { months, view = 'received' }) {
     row.adsense = round2(row.adsense);
     row.sponsor = round2(row.sponsor);
     row.total = round2(row.adsense + row.sponsor);
-    row.adsenseTax = taxOn(tax, 'adsense', row.adsense);
-    row.sponsorTax = taxOn(tax, 'sponsor', row.sponsor);
+    row.adsenseTax = taxOn(tax, 'adsense', round2(row.adsenseTaxable));
+    row.sponsorTax = taxOn(tax, 'sponsor', round2(row.sponsorTaxable));
     row.tax = round2(row.adsenseTax + row.sponsorTax);
     row.fees = round2(row.fees);
     row.net = round2(row.total - row.tax - row.fees);
@@ -148,26 +152,44 @@ export function sumRows(rows) {
   return t;
 }
 
-// Which months to show for a year: from the first month with data to the current month
-// (or December for past years). "last12" gives the rolling 12 months.
+// Months for the table: a calendar year (up to this month) or 'lifetime',
+// never before the registration month.
 export function monthsFor(data, year, view) {
   const today = monthOf(todayISO());
-  if (year === 'last12') return Array.from({ length: 12 }, (_, i) => addMonths(today, i - 11));
-  const y = Number(year);
-  const items = incomeItems(data).map((it) => (view === 'earned' ? it.earned : it.received)).filter((m) => m.startsWith(`${y}-`));
-  const last = String(y) === today.slice(0, 4) ? today : `${y}-12`;
-  let first = items.length ? items.sort()[0] : last;
-  if (first > last) first = last;
+  const start = data.settings.tax.startMonth || '';
+  const items = incomeItems(data).map((it) => (view === 'earned' ? it.earned : it.received)).filter((m) => !start || m >= start);
+  let first, last;
+  if (year === 'lifetime') {
+    first = start || (items.length ? items.sort()[0] : today);
+    last = today;
+  } else {
+    const y = String(year);
+    first = `${y}-01`;
+    if (start && start > first) first = start;
+    const withData = items.filter((m) => m.startsWith(`${y}-`)).sort();
+    if (!start && withData.length) first = withData[0];
+    last = y === today.slice(0, 4) ? today : `${y}-12`;
+  }
   const out = [];
   for (let m = first; m <= last; m = addMonths(m, 1)) out.push(m);
-  // money not received yet (e.g. this month's AdSense, paid next month) shows under "Still to come"
-  if (view === 'earned') for (const m of [...new Set(items)].sort()) if (m > last && !out.includes(m)) out.push(m);
   return out;
 }
 
+// Months for the chart: always a full January–December cycle for a year.
+export function chartMonthsFor(data, year, view) {
+  if (year === 'lifetime') return monthsFor(data, year, view);
+  return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+}
+
 export function yearsWithData(data) {
-  const ys = new Set([todayISO().slice(0, 4)]);
-  for (const it of incomeItems(data)) { ys.add(it.received.slice(0, 4)); ys.add(it.earned.slice(0, 4)); }
+  const now = todayISO().slice(0, 4);
+  const start = data.settings.tax.startMonth || '';
+  const ys = new Set([now]);
+  if (start) {
+    for (let y = Number(start.slice(0, 4)); y <= Number(now); y++) ys.add(String(y));
+  } else {
+    for (const it of incomeItems(data)) { ys.add(it.received.slice(0, 4)); ys.add(it.earned.slice(0, 4)); }
+  }
   return [...ys].filter(Boolean).sort().reverse();
 }
 
@@ -207,6 +229,8 @@ export function nextDeclaration(data, today = todayISO()) {
     ym = addMonths(ym, -1);
     const key = periodKey(ym, tax.period);
     if (key === thisPeriod || seen.has(key)) continue;
+    const pm = periodInfo(key).months;
+    if (tax.startMonth && pm[pm.length - 1] < tax.startMonth) break; // before registration
     seen.add(key);
     list.push(key);
     if (list.length >= 4) break;
@@ -395,4 +419,124 @@ export function projection(rows, year) {
   const avg = done.reduce((s, r) => s + r.total, 0) / done.length;
   const remaining = String(year) === now.slice(0, 4) ? 12 - Number(now.slice(5, 7)) : 0;
   return { ytd, avg: round2(avg), year: round2(ytd + avg * remaining) };
+}
+
+// Every declaration period from registration up to (not including) a given period.
+export function periodsBefore(data, key) {
+  const tax = data.settings.tax;
+  if (!tax.startMonth) return [];
+  const out = [];
+  let ym = tax.startMonth;
+  const stop = periodInfo(key).months[0];
+  while (ym < stop) {
+    const k = periodKey(ym, tax.period);
+    if (!out.includes(k)) out.push(k);
+    ym = addMonths(ym, 1);
+  }
+  return out;
+}
+
+// ---------- YouTube Studio export ----------
+// "Date,Estimated revenue (EUR)" with rows like "2026-09,1625.876" (a "Total" row is skipped).
+export function parseYouTubeCsv(text) {
+  const lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return null;
+  const sep = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+  const head = splitCsvLine(lines[0], sep).map(norm);
+  const cDate = head.findIndex((h) => h === 'date' || h.startsWith('date'));
+  const cRev = head.findIndex((h) => /revenue|revenus|earnings/.test(h));
+  if (cDate < 0 || cRev < 0) return null;
+  const currency = (/\(([a-z]{3})\)/i.exec(lines[0].split(sep)[cRev]) || [])[1]?.toUpperCase() || 'EUR';
+  const byMonth = new Map();
+  for (const line of lines.slice(1)) {
+    const c = splitCsvLine(line, sep);
+    const d = c[cDate] || '';
+    const m = /^(\d{4})-(\d{2})/.exec(d);
+    if (!m) continue; // "Total" and junk
+    const ym = `${m[1]}-${m[2]}`;
+    byMonth.set(ym, (byMonth.get(ym) || 0) + parseNumber(c[cRev]));
+  }
+  const months = [...byMonth.entries()].map(([month, amount]) => ({ month, amount: round2(amount) })).sort((a, b) => (a.month < b.month ? -1 : 1));
+  return months.length ? { months, currency } : null;
+}
+
+// ---------- what's missing ----------
+function compressRuns(list, label = (x) => x) {
+  // ["2025-01","2025-02","2025-04"] -> "Jan 2025 – Feb 2025, Apr 2025"
+  const out = [];
+  let runStart = null, prev = null;
+  for (const m of list) {
+    if (prev && addMonths(prev, 1) === m) { prev = m; continue; }
+    if (runStart) out.push(runStart === prev ? label(runStart) : `${label(runStart)} – ${label(prev)}`);
+    runStart = m; prev = m;
+  }
+  if (runStart) out.push(runStart === prev ? label(runStart) : `${label(runStart)} – ${label(prev)}`);
+  return out.join(', ');
+}
+
+export function coverage(data) {
+  const tax = data.settings.tax;
+  const today = monthOf(todayISO());
+  const start = tax.startMonth;
+  if (!start) return { needsStart: true };
+  const lastDone = addMonths(today, -1);
+  const items = incomeItems(data);
+  const L = (m) => monthLabel(m, true);
+  // AdSense: one entry per earned month from the month before registration (paid in the first month)
+  const adsByMonth = new Map(items.filter((i) => i.type === 'adsense').map((i) => [i.earned, i]));
+  const adsMissing = [];
+  for (let m = addMonths(start, -1); m <= lastDone; m = addMonths(m, 1)) if (!adsByMonth.has(m)) adsMissing.push(m);
+  const adsInRange = [...adsByMonth.values()].filter((i) => i.received >= start && i.received <= today);
+  const adsEstimated = adsInRange.filter((i) => i.estimated).map((i) => i.received).sort();
+  // Sponsors: months since registration not covered by an imported bank statement
+  const covered = new Set();
+  for (const p of tax.bankStatements || []) {
+    for (let m = monthOf(p.from); m <= monthOf(p.to); m = addMonths(m, 1)) covered.add(m);
+  }
+  for (const it of items) if (it.type === 'sponsor' && it.kind === 'invoice') covered.add(it.received);
+  const firstSponsor = items.filter((i) => i.type === 'sponsor').map((i) => i.received).sort()[0] || null;
+  const sponsorGaps = [];
+  for (let m = start; m <= today; m = addMonths(m, 1)) if (!covered.has(m)) sponsorGaps.push(m);
+  // Invoice numbers: gaps below the highest number in the app
+  const prefix = data.settings.invoice.prefix || '';
+  const pad = Number(data.settings.invoice.padding) || 0;
+  const nums = (data.invoices || []).map((i) => {
+    const m = /(\d+)\s*$/.exec(String(i.number).slice(prefix.length));
+    return String(i.number).startsWith(prefix) && m ? Number(m[1]) : null;
+  }).filter((n) => n != null).sort((a, b) => a - b);
+  const missingNums = [];
+  if (nums.length) for (let n = 1; n < nums[nums.length - 1]; n++) if (!nums.includes(n)) missingNums.push(n);
+  const fmtN = (n) => `${prefix}${String(n).padStart(pad, '0')}`;
+  let invoiceGapText = '';
+  if (missingNums.length) {
+    const runs = [];
+    let a = missingNums[0], b = a;
+    for (const n of missingNums.slice(1)) { if (n === b + 1) b = n; else { runs.push([a, b]); a = n; b = n; } }
+    runs.push([a, b]);
+    invoiceGapText = runs.map(([x, y]) => (x === y ? fmtN(x) : `${fmtN(x)}–${fmtN(y)}`)).join(', ');
+  }
+  return {
+    start,
+    adsMissing: compressRuns(adsMissing, L),
+    adsMissingCount: adsMissing.length,
+    adsEstimatedCount: adsEstimated.length,
+    adsReceivedCount: adsInRange.length,
+    sponsorGaps: compressRuns(sponsorGaps, L),
+    sponsorGapCount: sponsorGaps.length,
+    firstSponsor,
+    statements: (tax.bankStatements || []).slice().sort((a, b) => (a.from < b.from ? -1 : 1)),
+    invoiceGapText,
+    invoiceGapCount: missingNums.length,
+  };
+}
+
+// Adds a date range to the list of imported statements, merging overlaps.
+export function addStatementPeriod(list, from, to) {
+  const all = [...(list || []), { from, to }].sort((a, b) => (a.from < b.from ? -1 : 1));
+  const out = [];
+  for (const p of all) {
+    const last = out[out.length - 1];
+    if (last && p.from <= last.to) { if (p.to > last.to) last.to = p.to; } else out.push({ ...p });
+  }
+  return out;
 }

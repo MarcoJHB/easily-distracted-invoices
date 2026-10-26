@@ -196,7 +196,8 @@ export function renderSettings(root, { navigate, section = 'business' }) {
         <div class="grid2">
           ${p('settings.tax.adsenseCategory', { label: 'AdSense is declared as', options: [['bnc', 'BNC (non-commercial)'], ['bic', 'BIC – prestations de services']] })}
           ${p('settings.tax.sponsorCategory', { label: 'Sponsorships are declared as', options: [['bic', 'BIC – prestations de services'], ['bnc', 'BNC (non-commercial)']] })}
-          ${p('settings.tax.period', { label: 'You declare to URSSAF', options: [['quarterly', 'Every quarter'], ['monthly', 'Every month']] })}
+          ${p('settings.tax.period', { label: 'You declare to URSSAF', options: [['monthly', 'Every month'], ['quarterly', 'Every quarter']] })}
+          ${p('settings.tax.startMonth', { label: 'Registered since', type: 'month', hint: 'The dashboard and URSSAF figures start this month.' })}
         </div>
         <p class="fineprint">Sources don’t all agree on whether sponsorships are BIC or BNC for creators. Go with what your URSSAF registration says, and ask your accountant if unsure.</p>
       </section>
