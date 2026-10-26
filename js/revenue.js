@@ -30,6 +30,7 @@ export function defaultTaxSettings() {
     startMonth: '', // registered as micro-entrepreneur since (YYYY-MM); nothing before counts
     bankStatements: [], // [{ from, to }] date ranges covered by imported bank statements
     earnedBasisUntil: '', // YYYY-MM: AdSense earned up to this month was already declared by month earned
+    declarations: {}, // what you actually declared: { "2026-08": { ca: 1471, contributions: 367 } }
   };
 }
 
@@ -549,4 +550,30 @@ export function addStatementPeriod(list, from, to) {
     if (last && p.from <= last.to) { if (p.to > last.to) last.to = p.to; } else out.push({ ...p });
   }
   return out;
+}
+
+// Every declaration period from registration to the last finished one, newest first,
+// with what the app counts as received next to what you declared.
+export function declarationHistory(data, today = todayISO()) {
+  const tax = data.settings.tax;
+  if (!tax.startMonth) return [];
+  const now = monthOf(today);
+  const keys = [];
+  for (let m = tax.startMonth; m < now; m = addMonths(m, 1)) {
+    const k = periodKey(m, tax.period);
+    if (!keys.includes(k)) keys.push(k);
+  }
+  const cur = periodKey(now, tax.period);
+  return keys.filter((k) => k !== cur).reverse().map((k) => {
+    const info = periodInfo(k);
+    const rows = monthlyRows(data, { months: info.months, view: 'received' });
+    const t = sumRows(rows);
+    const d = (tax.declarations || {})[k] || null;
+    const ca = d && d.ca !== '' && d.ca != null ? Number(d.ca) : null;
+    return {
+      key: k, info, received: Math.round(t.total), adsense: t.adsense, sponsor: t.sponsor, estimated: t.estimated,
+      declared: ca, contributions: d && d.contributions !== '' && d.contributions != null ? Number(d.contributions) : null,
+      diff: ca == null ? null : Math.round(t.total) - ca,
+    };
+  });
 }

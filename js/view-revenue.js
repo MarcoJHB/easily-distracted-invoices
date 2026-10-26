@@ -1,12 +1,12 @@
 // Revenue: month-by-month income, URSSAF contributions, limits and bank imports.
 import { store } from './store.js';
 import {
-  esc, fmtMoney, fmtDate, todayISO, daysBetween, parseNumber, round2, uid, clone,
+  esc, fmtMoney, fmtDate, todayISO, daysBetween, parseNumber, round2, uid, clone, downloadBlob,
 } from './util.js';
 import { icons, modal, field, formValues, toast, confirmDialog } from './ui.js';
 import {
   monthlyRows, sumRows, monthsFor, chartMonthsFor, yearsWithData, monthLabel, MONTHS_SHORT, addMonths, monthOf,
-  parseYouTubeCsv, coverage, addStatementPeriod, periodsBefore,
+  parseYouTubeCsv, coverage, addStatementPeriod, periodsBefore, declarationHistory, periodInfo,
   incomeItems, nextDeclaration, declarationAmounts, expectedIncome, sourceRate, normalizeRevenue,
   parseBankCsv, detectIncome, matchInvoice, projection, isMonth,
 } from './revenue.js';
@@ -66,11 +66,12 @@ export function renderRevenue(root, { navigate }) {
     <section class="card table-card" aria-labelledby="table-h">
       <div class="card-head">
         <h2 id="table-h">Monthly breakdown</h2>
-        <a href="#/settings/tax" class="link-btn" data-role="rates"></a>
+        <span class="row"><a href="#/settings/tax" class="link-btn" data-role="rates"></a><button type="button" class="btn btn-ghost btn-sm" data-act="exportcsv">${icons.download}CSV</button></span>
       </div>
       <div class="rev-table-wrap"><table class="rev-table" data-role="table"></table></div>
       <p class="fineprint">Click any amount to see or edit the payments behind it. “est.” means the AdSense figure is still YouTube’s estimate.</p>
     </section>
+    <section class="card history" data-role="history" aria-labelledby="hist-h"></section>
     <section class="card insights" data-role="insights" aria-labelledby="ins-h"></section>`;
 
   const q = (s) => root.querySelector(s);
@@ -356,6 +357,34 @@ export function renderRevenue(root, { navigate }) {
   }
 
   // ---------- insights ----------
+  // ---------- what you declared vs what arrived ----------
+  function drawHistory() {
+    const el = q('[data-role=history]');
+    const hist = declarationHistory(store.data);
+    if (!hist.length) { el.hidden = true; return; }
+    el.hidden = false;
+    const filled = hist.filter((h) => h.declared != null);
+    // small gaps are normal: YouTube's estimates differ a little from what Google pays
+    const tol = (h) => Math.max(15, h.received * 0.02);
+    const off = filled.filter((h) => Math.abs(h.diff) >= tol(h));
+    el.innerHTML = `
+      <div class="card-head"><h2 id="hist-h">What you declared to URSSAF</h2>
+        <span class="muted small">${filled.length ? `${filled.length} of ${hist.length} filled in${off.length ? ` · <b class="warn">${off.length} don’t match</b>` : ' · all match'}` : 'Copy the amounts from your URSSAF account'}</span></div>
+      <p class="card-sub">Type in the turnover (chiffre d’affaires) and contributions from each declaration in your URSSAF account. The app compares them with the money that reached your bank in that period.</p>
+      <div class="rev-table-wrap"><table class="rev-table hist-table">
+        <thead><tr><th scope="col">Period</th><th scope="col" class="num">Arrived in bank</th><th scope="col" class="num">You declared</th><th scope="col" class="num">Difference</th><th scope="col" class="num">Contributions paid</th></tr></thead>
+        <tbody>${hist.map((h) => `
+          <tr data-key="${esc(h.key)}" class="${h.diff != null && Math.abs(h.diff) >= tol(h) ? 'mismatch' : ''}">
+            <th scope="row">${esc(h.info.label)}</th>
+            <td class="num">${eur(h.received).replace('.00', '')}<small>${h.adsense ? `AdSense ${eur(h.adsense)}${h.estimated ? ' est.' : ''}` : ''}${h.adsense && h.sponsor ? ' · ' : ''}${h.sponsor ? `Sponsors ${eur(h.sponsor)}` : ''}</small></td>
+            <td class="num"><input class="hist-in" data-f="ca" inputmode="decimal" value="${h.declared ?? ''}" placeholder="—" aria-label="Turnover declared for ${esc(h.info.label)}"></td>
+            <td class="num">${h.diff == null ? '<span class="muted">—</span>' : Math.abs(h.diff) < tol(h) ? `<span class="ok-txt">${icons.check}OK</span>` : `<b class="${h.diff > 0 ? 'warn' : 'over'}">${h.diff > 0 ? `${eur(h.diff).replace('.00', '')} not declared` : `${eur(-h.diff).replace('.00', '')} too much`}</b>`}</td>
+            <td class="num"><input class="hist-in" data-f="contributions" inputmode="decimal" value="${h.contributions ?? ''}" placeholder="—" aria-label="Contributions paid for ${esc(h.info.label)}"></td>
+          </tr>`).join('')}</tbody>
+      </table></div>
+      <p class="fineprint">“Arrived in bank” is only as complete as the data you’ve imported. Months before your first bank statement show AdSense only, and AdSense uses YouTube’s estimates until you add Google’s real payments.</p>`;
+  }
+
   function drawInsights({ rows, total }) {
     const items = incomeItems(store.data).filter((it) => rows.some((r) => r.month === (state.view === 'earned' ? it.earned : it.received)));
     const sponsorPays = items.filter((it) => it.type === 'sponsor');
@@ -401,6 +430,7 @@ export function renderRevenue(root, { navigate }) {
     drawLimits(c);
     drawChart(c);
     drawTable(c);
+    drawHistory();
     drawInsights(c);
     lastC = c;
   }
@@ -423,6 +453,15 @@ export function renderRevenue(root, { navigate }) {
     if (!btn) return;
     switch (btn.dataset.act) {
       case 'add': editEntry(null); break;
+      case 'exportcsv': {
+        const c = compute();
+        const decl = store.data.settings.tax.declarations || {};
+        const head = ['Month', 'AdSense received (EUR)', 'AdSense is estimate', 'Sponsors received (EUR)', 'Total received (EUR)', 'AdSense contributions', 'Sponsor contributions', 'Contributions total', 'Bank fees', 'Take-home', 'Declared to URSSAF (EUR)', 'Contributions paid (EUR)'];
+        const lines = c.rows.map((r) => [r.month, r.adsense, r.estimated ? 'yes' : 'no', r.sponsor, r.total, r.adsenseTax, r.sponsorTax, r.tax, r.fees, r.net, decl[r.month]?.ca ?? '', decl[r.month]?.contributions ?? '']);
+        const csv = '\uFEFF' + [head, ...lines].map((l) => l.join(',')).join('\r\n');
+        downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `revenue-${state.year}-${state.view}.csv`);
+        break;
+      }
       case 'import': importDialog(); break;
       case 'declareAll': {
         const keys = periodsBefore(store.data, btn.dataset.key);
@@ -440,12 +479,33 @@ export function renderRevenue(root, { navigate }) {
       }
       case 'declared': {
         const key = btn.dataset.key;
-        store.update((d) => { if (!d.settings.tax.declared.includes(key)) d.settings.tax.declared.push(key); });
+        const a = declarationAmounts(store.data, periodInfo(key));
+        store.update((d) => {
+          if (!d.settings.tax.declared.includes(key)) d.settings.tax.declared.push(key);
+          const t = d.settings.tax;
+          if (!t.declarations?.[key] && (a.bic + a.bnc) > 0) t.declarations = { ...(t.declarations || {}), [key]: { ca: a.bic + a.bnc, contributions: a.contributions } };
+        });
         toast(`${key.replace('-', ' ')} marked as declared`, { action: { label: 'Undo', fn: () => store.update((d) => { d.settings.tax.declared = d.settings.tax.declared.filter((k) => k !== key); }) } });
         break;
       }
       default:
     }
+  });
+
+  root.addEventListener('change', (e) => {
+    const inp = e.target.closest('.hist-in');
+    if (!inp) return;
+    const key = inp.closest('[data-key]').dataset.key;
+    const raw = inp.value.trim();
+    const val = raw === '' ? null : Math.round(parseNumber(raw) * 100) / 100;
+    store.update((d) => {
+      const t = d.settings.tax;
+      t.declarations = { ...(t.declarations || {}) };
+      const rec = { ...(t.declarations[key] || {}) };
+      rec[inp.dataset.f] = val;
+      t.declarations[key] = rec;
+      if (rec.ca != null && !t.declared.includes(key)) t.declared.push(key);
+    });
   });
 
   const ro = new ResizeObserver(() => { if (lastC) drawChart(lastC); });
@@ -689,6 +749,18 @@ async function importDialog() {
           if (/\.json$/i.test(file.name) || text.trim().startsWith('{')) {
             let j;
             try { j = JSON.parse(text); } catch { throw new Error('That JSON file is damaged and can’t be read.'); }
+            if (!Array.isArray(j) && j.declarations && typeof j.declarations === 'object' && !j.revenue) {
+              const n = Object.keys(j.declarations).length;
+              store.update((d) => {
+                const t = d.settings.tax;
+                t.declarations = { ...(t.declarations || {}), ...j.declarations };
+                t.declared = [...new Set([...t.declared, ...Object.keys(j.declarations)])];
+                if (j.startMonth && !t.startMonth) t.startMonth = j.startMonth;
+              });
+              toast(`Recorded ${n} URSSAF declaration${n === 1 ? '' : 's'}`);
+              el.closest('.modal-wrap').querySelector('[data-close]').click();
+              return;
+            }
             const list = Array.isArray(j) ? j : j.revenue;
             if (!Array.isArray(list)) throw new Error('This JSON has no revenue entries.');
             jsonEntries = list.filter((x) => x && typeof x === 'object').map(normalizeRevenue);
