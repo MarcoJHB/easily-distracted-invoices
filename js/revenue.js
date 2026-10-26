@@ -213,13 +213,13 @@ export function nextDeclaration(data, today = todayISO()) {
   }
   const hasIncome = (k) => declarationAmounts(data, periodInfo(k)).bic + declarationAmounts(data, periodInfo(k)).bnc > 0;
   const pending = list.filter((k, i) => !(tax.declared || []).includes(k) && (i === 0 || hasIncome(k)));
-  const key = pending[0] || null; // most recent undeclared
-  const overdue = pending.filter((k) => periodInfo(k).due < today);
-  if (!key) {
-    return { info: periodInfo(thisPeriod), upcoming: true, overdue: [] };
+  const latest = list[0];
+  const overdue = pending.filter((k) => k !== latest && periodInfo(k).due < today).map(periodInfo);
+  if (!pending.includes(latest)) {
+    // latest finished period is done: point at the one in progress
+    return { info: periodInfo(thisPeriod), upcoming: true, overdue };
   }
-  const info = periodInfo(key);
-  return { info, upcoming: false, overdue: overdue.filter((k) => k !== key).map(periodInfo) };
+  return { info: periodInfo(latest), upcoming: false, overdue };
 }
 
 export function declarationAmounts(data, info) {
@@ -229,10 +229,12 @@ export function declarationAmounts(data, info) {
   const byCat = { bic: 0, bnc: 0 };
   byCat[tax.adsenseCategory] += t.adsense;
   byCat[tax.sponsorCategory] += t.sponsor;
+  const bic = Math.round(byCat.bic); // URSSAF takes whole euros
+  const bnc = Math.round(byCat.bnc);
   return {
-    bic: Math.round(byCat.bic), // URSSAF takes whole euros
-    bnc: Math.round(byCat.bnc),
-    contributions: t.tax,
+    bic,
+    bnc,
+    contributions: round2((bic * categoryRate(tax, 'bic') + bnc * categoryRate(tax, 'bnc')) / 100),
     estimated: t.estimated,
     adsense: t.adsense,
     sponsor: t.sponsor,
@@ -295,7 +297,7 @@ function toISO(d) {
 // Returns { rows: [{ date, label, info, amount (+credit / -debit), ref }], period }.
 export function parseBankCsv(text) {
   const lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) throw new Error('That file is empty.');
+  if (lines.length < 2) throw new Error('That file has no transactions in it.');
   const sep = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ';' : ',';
   const headers = splitCsvLine(lines[0], sep);
   const cDate = findCol(headers, 'date de comptabilisation', 'date operation', 'date');
@@ -356,7 +358,7 @@ export function detectIncome(parsed, data) {
     let kind = 'skip', payer = '', reason = 'Looks personal';
     if (/google|adsense|youtube/i.test(text)) { kind = 'adsense'; payer = 'Google (AdSense)'; reason = 'Mentions Google/YouTube'; }
     else if (client) { kind = 'sponsor'; payer = client.c.name; reason = `Paid by ${client.c.name}`; }
-    else if (invoiceMatch) { kind = 'sponsor'; payer = ''; reason = `Mentions invoice ${invoiceMatch[1].toUpperCase()}`; }
+    else if (invoiceMatch) { kind = 'sponsor'; payer = `Invoice ${invoiceMatch[1].toUpperCase()}`; reason = `Mentions invoice ${invoiceMatch[1].toUpperCase()}`; }
     else if (/interne|savings|epargne|remise|retrait|from savings/i.test(text)) { reason = 'Internal transfer or refund'; }
     out.push({ ...r, ref, kind, payer, fees, invoiceNumber: invoiceMatch ? invoiceMatch[1].toUpperCase() : '', reason, clientId: client?.c.id || '' });
   }
@@ -373,10 +375,11 @@ export function matchInvoice(found, data) {
   let best = null;
   for (const inv of unpaid) {
     if (found.clientId && inv.clientId && inv.clientId !== found.clientId) continue;
+    if (inv.issueDate && found.date < inv.issueDate) continue; // can't pay an invoice before it exists
     const eur = invoiceEur(inv);
     if (!eur) continue;
     const diff = Math.abs(eur - found.amount) / eur;
-    if (diff <= 0.06 && (!best || diff < best.diff)) best = { invoice: inv, how: 'amount', diff };
+    if (diff <= 0.03 && (!best || diff < best.diff)) best = { invoice: inv, how: 'amount', diff };
   }
   return best;
 }

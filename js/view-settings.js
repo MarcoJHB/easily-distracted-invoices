@@ -63,7 +63,16 @@ export function renderSettings(root, { navigate, section = 'business' }) {
       el.addEventListener(evt, () => {
         const path = el.dataset.path.split('.');
         let v = el.type === 'checkbox' ? el.checked : el.value;
-        if (el.dataset.num) v = parseNumber(v);
+        if (el.dataset.num) {
+          const raw = String(v).trim();
+          v = parseNumber(raw);
+          const min = el.dataset.min != null ? Number(el.dataset.min) : -Infinity;
+          const max = el.dataset.max != null ? Number(el.dataset.max) : Infinity;
+          const bad = raw === '' || !/\d/.test(raw) || v < min || v > max;
+          el.setAttribute('aria-invalid', String(bad));
+          el.title = bad ? `Enter a number between ${min} and ${max}` : '';
+          if (bad) return; // keep the last good value
+        }
         store.update((d) => {
           let o = d;
           for (const k of path.slice(0, -1)) o = o[k];
@@ -179,7 +188,7 @@ export function renderSettings(root, { navigate, section = 'business' }) {
 
     tax: () => {
       const t = s.tax;
-      const pct = { num: true, attrs: 'inputmode="decimal" step="0.1" min="0" max="60"', type: 'number' };
+      const pct = { num: true, attrs: 'inputmode="decimal" data-min="0" data-max="60"', type: 'text' };
       return `
       <section class="card">
         <h2>How your income is taxed</h2>

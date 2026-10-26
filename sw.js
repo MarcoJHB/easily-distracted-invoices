@@ -1,12 +1,12 @@
 // Lets the app open without a connection. Only the app's own files are cached;
 // your data never goes through here (it's kept in localStorage and on GitHub).
-const CACHE = 'edg-app-v1';
+const CACHE = 'edg-app-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest',
   'css/styles.css', 'css/invoice.css',
   'js/app.js', 'js/store.js', 'js/github.js', 'js/rates.js', 'js/invoice.js', 'js/invoice-actions.js',
   'js/ui.js', 'js/util.js', 'js/signature.js',
-  'js/view-invoices.js', 'js/view-editor.js', 'js/view-clients.js', 'js/view-settings.js',
+  'js/view-invoices.js', 'js/view-editor.js', 'js/view-clients.js', 'js/view-settings.js', 'js/view-revenue.js', 'js/revenue.js',
   'vendor/html2pdf.bundle.min.js', 'assets/logo.png',
 ];
 

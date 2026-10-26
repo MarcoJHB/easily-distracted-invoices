@@ -327,8 +327,8 @@ export function renderRevenue(root, { navigate }) {
       facts.push(`<li class="fact-warn"><b>${eur(feeTotal)} lost to bank fees</b> on ${withFees.length} sponsor payment${withFees.length === 1 ? '' : 's'}, ${pct((feeTotal / (total.sponsor || 1)) * 100)} of sponsor income.${worst ? ` The worst: ${eur(worst.fees)} taken from a ${eur(worst.amount)} payment.` : ''} The fees are a flat ~€33 per transfer, so a few larger payments cost far less than many small ones.</li>`);
     }
     if (best) facts.push(`<li><b>Best month:</b> ${esc(monthLabel(best.month))} with ${eur(best.total)}.</li>`);
-    const avgTax = active.length ? active.reduce((s, r) => s + r.tax, 0) / active.length : 0;
-    if (active.length > 1) facts.push(`<li><b>Average finished month:</b> ${eur(avg)} in, ${eur(avg - avgTax)} after contributions.</li>`);
+    const avgNet = active.length ? active.reduce((s, r) => s + r.net, 0) / active.length : 0;
+    if (active.length > 1) facts.push(`<li><b>Average finished month:</b> ${eur(avg)} in, ${eur(avgNet)} take-home after contributions and fees.</li>`);
     if (total.total) facts.push(`<li><b>Mix:</b> ${pct(shareA)} AdSense, ${pct(100 - shareA)} sponsors.</li>`);
     if (store.data.settings.tax.versementLiberatoire === false && total.total) {
       const t = store.data.settings.tax;
@@ -476,12 +476,12 @@ export async function editEntry(existing, preset = {}) {
     });
   // one AdSense entry per earned month: replace rather than duplicate
   const dupe = rec.type === 'adsense' && store.data.revenue.find((x) => x.type === 'adsense' && x.earnedMonth === rec.earnedMonth && x.id !== rec.id);
-  if (dupe && !existing) {
+  if (dupe) {
     const ok = await confirmDialog(`You already have ${eur(dupe.amount)} of AdSense for ${monthLabel(rec.earnedMonth)}. Replace it with ${eur(rec.amount)}?`, { title: 'Replace AdSense month', ok: 'Replace' });
     if (!ok) return;
-    rec.id = dupe.id;
   }
   store.update((d) => {
+    if (dupe) d.revenue = d.revenue.filter((x) => x.id !== dupe.id);
     const i = d.revenue.findIndex((x) => x.id === rec.id);
     if (i >= 0) d.revenue[i] = rec; else d.revenue.push(rec);
   });
@@ -523,6 +523,15 @@ async function monthDetail(month, type, view, navigate) {
 function isImported(ref) {
   return store.data.revenue.some((x) => x.bankRef === ref) || store.data.invoices.some((i) => i.bankRef === ref);
 }
+// Same money already recorded another way (another CSV format, typed in by hand, a paid invoice)?
+function sameMoney({ receivedDate, date, amount }) {
+  const d = receivedDate || date;
+  if (!d) return false;
+  const near = (a) => Math.abs(a - amount) < 0.01;
+  return store.data.revenue.some((x) => x.receivedDate === d && near(x.amount))
+    || store.data.invoices.some((i) => i.status === 'paid' && i.paidDate === d && near(Number(i.paidAmountEur) || 0));
+}
+const alreadyIn = (f) => isImported(f.ref) || sameMoney(f);
 
 async function importDialog() {
   let found = null; // detected rows
@@ -531,7 +540,7 @@ async function importDialog() {
   const render = (el) => {
     const out = el.querySelector('[data-role=result]');
     if (jsonEntries) {
-      const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id || (x.bankRef && r.bankRef === x.bankRef)));
+      const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
       out.innerHTML = `<p class="modal-text">This file has <b>${jsonEntries.length}</b> income entries${fresh.length < jsonEntries.length ? `, ${jsonEntries.length - fresh.length} already in the app` : ''}.</p>
         <ul class="pay-list">${fresh.map((x) => `<li><span class="pay-main"><b>${eur(x.amount)}</b><small>${x.type === 'adsense' ? `AdSense earned ${esc(monthLabel(x.earnedMonth))}${x.estimated ? ' (estimate)' : ''}` : `${esc(x.payer || 'Sponsor')} · ${esc(fmtDate(x.receivedDate))}${x.fees ? ` · ${eur(x.fees)} fees` : ''}`}</small></span></li>`).join('')}</ul>`;
       return;
@@ -541,7 +550,7 @@ async function importDialog() {
     const other = found.filter((f) => f.kind === 'skip' && !f.include);
     const unpaid = store.data.invoices.filter((i) => i.status !== 'paid');
     const row = (f, i) => {
-      const done = isImported(f.ref);
+      const done = alreadyIn(f);
       return `<tr class="${done ? 'done' : ''}">
         <td>${esc(fmtDate(f.date))}</td>
         <td class="num"><b>${eur(f.amount)}</b>${f.fees ? `<small>−${eur(f.fees)} fees</small>` : ''}</td>
@@ -555,9 +564,9 @@ async function importDialog() {
             ${unpaid.map((inv) => `<option value="${esc(inv.id)}"${f.invoiceId === inv.id ? ' selected' : ''}>Pays ${esc(inv.number)} (${esc(inv.client?.name || '')})</option>`).join('')}</select>`}</td>
       </tr>`;
     };
-    const todo = biz.filter((f) => !isImported(f.ref) && f.kind !== 'skip');
+    const todo = biz.filter((f) => !alreadyIn(f) && f.kind !== 'skip');
     out.innerHTML = `
-      <p class="modal-text">${period ? `Statement from ${esc(fmtDate(period[0]))} to ${esc(fmtDate(period[1]))}. ` : ''}Found <b>${biz.length}</b> business payment${biz.length === 1 ? '' : 's'}${todo.length ? `, <b>${todo.length}</b> new` : ', all already imported'}. Bank fees linked to each transfer are picked up too.</p>
+      <p class="modal-text">${period ? `Statement from ${esc(fmtDate(period[0]))} to ${esc(fmtDate(period[1]))}. ` : ''}${biz.length ? `Found <b>${biz.length}</b> business payment${biz.length === 1 ? '' : 's'}${todo.length ? `, <b>${todo.length}</b> new` : ', all already in the app'}.` : 'No sponsor or AdSense payments found. If one is listed under the skipped credits, mark it as business income.'} Bank fees linked to each transfer are picked up too.</p>
       ${biz.length ? `<div class="imp-wrap"><table class="imp-table"><thead><tr><th>Date</th><th class="num">Amount</th><th>From</th><th>Type</th><th>Invoice</th></tr></thead><tbody>${biz.map((f) => row(f, found.indexOf(f))).join('')}</tbody></table></div>` : ''}
       ${other.length ? `<details class="imp-other"><summary>${other.length} other credit${other.length === 1 ? '' : 's'} skipped as personal (transfers, refunds, sales…)</summary>
         <table class="imp-table"><tbody>${other.map((f) => `<tr><td>${esc(fmtDate(f.date))}</td><td class="num">${eur(f.amount)}</td><td><span class="imp-label">${esc(f.label)}</span><small>${esc(f.info || f.reason)}</small></td><td><button type="button" class="link-btn" data-include="${found.indexOf(f)}">It’s business income</button></td></tr>`).join('')}</tbody></table></details>` : ''}`;
@@ -584,7 +593,8 @@ async function importDialog() {
         try {
           const text = await file.text();
           if (/\.json$/i.test(file.name) || text.trim().startsWith('{')) {
-            const j = JSON.parse(text);
+            let j;
+            try { j = JSON.parse(text); } catch { throw new Error('That JSON file is damaged and can’t be read.'); }
             const list = Array.isArray(j) ? j : j.revenue;
             if (!Array.isArray(list)) throw new Error('This JSON has no revenue entries.');
             jsonEntries = list.filter((x) => x && typeof x === 'object').map(normalizeRevenue);
@@ -618,7 +628,7 @@ async function importDialog() {
         const s = ev.target.closest('select[data-i]');
         if (!s) return;
         const f = found[Number(s.dataset.i)];
-        if (s.dataset.f === 'kind') { f.kind = s.value; f.include = true; } else f.invoiceId = s.value;
+        if (s.dataset.f === 'kind') { f.kind = s.value; f.include = s.value !== 'skip'; } else f.invoiceId = s.value;
         render(el);
       });
       el.addEventListener('click', (ev) => {
@@ -633,12 +643,12 @@ async function importDialog() {
   });
   if (res !== 'go') return;
   if (jsonEntries) {
-    const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id || (x.bankRef && r.bankRef === x.bankRef)));
+    const fresh = jsonEntries.filter((x) => !store.data.revenue.some((r) => r.id === x.id) && !(x.bankRef && isImported(x.bankRef)) && !sameMoney(x));
     store.update((d) => { d.revenue.push(...fresh); });
     toast(`Imported ${fresh.length} income entr${fresh.length === 1 ? 'y' : 'ies'}`);
     return;
   }
-  const todo = found.filter((f) => f.kind !== 'skip' && !isImported(f.ref));
+  const todo = found.filter((f) => f.kind !== 'skip' && !alreadyIn(f));
   let invoicesPaid = 0, added = 0, replaced = 0;
   store.update((d) => {
     for (const f of todo) {
